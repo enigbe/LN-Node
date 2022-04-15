@@ -1,9 +1,9 @@
 [package]
-name = "ldk-tutorial-node"
+name = "ln-node"
 version = "0.1.0"
 authors = ["Enigbe Ochekliye <enigbeos@protonmail.com>"]
 license = "MIT OR Apache-2.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -30,6 +30,7 @@ tokio = { version = "1", features = [ "io-util", "macros", "rt", "rt-multi-threa
 actix-web = "4.0.1"
 config = "0.13.1"
 serde = "1.0.136"
+dotenv = "0.15.0"
 
 [profile.release]
 panic = "abort"
@@ -38,9 +39,13 @@ panic = "abort"
 panic = "abort"
 
 [[bin]]
-name = "ldk"
+name = "ln-node"
 path = "src/lib/main.rs"
 
 [[bin]]
 name = "server"
 path = "src/bin/server.rs"
+
+[lib]
+name = "lnnode"
+path = "src/lib/main.rs"

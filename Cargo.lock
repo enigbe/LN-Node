@@ -498,6 +498,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0688c2a7f92e427f44895cd63841bff7b29f8d7a1648b9e7e07a4a365b2e1257"
 
 [[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,31 +809,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
-name = "ldk-tutorial-node"
-version = "0.1.0"
-dependencies = [
- "actix-web",
- "base64",
- "bech32",
- "bitcoin",
- "bitcoin-bech32",
- "chrono",
- "config",
- "futures",
- "hex",
- "lightning",
- "lightning-background-processor",
- "lightning-block-sync",
- "lightning-invoice",
- "lightning-net-tokio",
- "lightning-persister",
- "rand 0.4.6",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -908,6 +889,32 @@ name = "linked-hash-map"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fb9b38af92608140b86b693604b9ffcc5824240a484d1ecd4795bacb2fe88f3"
+
+[[package]]
+name = "ln-node"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "base64",
+ "bech32",
+ "bitcoin",
+ "bitcoin-bech32",
+ "chrono",
+ "config",
+ "dotenv",
+ "futures",
+ "hex",
+ "lightning",
+ "lightning-background-processor",
+ "lightning-block-sync",
+ "lightning-invoice",
+ "lightning-net-tokio",
+ "lightning-persister",
+ "rand 0.4.6",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "local-channel"
