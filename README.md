@@ -1,31 +1,34 @@
-# ldk-sample
-Sample node implementation using LDK.
+# LN-Node
+
+Modification of the sample node implementation using LDK.
+LN-Node's is a lightning node with a separate CLI binary that should work akin to
+`LND` and its command line interface tool `lncli`
 
 ## Installation
+
 ```
-git clone https://github.com/lightningdevkit/ldk-sample
+git clone https://github.com/enigbe/LN-Node
 ```
 
-## Usage
+## Usage [WIP]
+
+1. Start the LDK node
+
 ```
-cd ldk-sample
-cargo run <bitcoind-rpc-username>:<bitcoind-rpc-password>@<bitcoind-rpc-host>:<bitcoind-rpc-port> <ldk_storage_directory_path> [<ldk-peer-listening-port>] [bitcoin-network] [announced-listen-addr announced-node-name]
+$ cd /path/to/LN-Node
+$ chmod +x lnnode.sh
+$ ./lnnode.sh
 ```
-`bitcoind`'s RPC username and password likely can be found through `cat ~/.bitcoin/.cookie`.
-
-`bitcoin-network`: defaults to `testnet`. Options: `testnet`, `regtest`, and `signet`.
-
-`ldk-peer-listening-port`: defaults to 9735.
-
-`announced-listen-addr` and `announced-node-name`: default to nothing, disabling any public announcements of this node.
-`announced-listen-addr` can be set to an IPv4 or IPv6 address to announce that as a publicly-connectable address for this node.
-`announced-node-name` can be any string up to 32 bytes in length, representing this node's alias.
 
 ## License
 
 Licensed under either:
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+```
+
+```
