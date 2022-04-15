@@ -1,8 +1,8 @@
 pub mod bitcoind_client;
-mod cli;
-mod convert;
-mod disk;
-mod hex_utils;
+pub mod cli;
+pub mod convert;
+pub mod disk;
+pub mod hex_utils;
 
 use crate::bitcoind_client::BitcoindClient;
 use crate::disk::FilesystemLogger;
@@ -13,6 +13,7 @@ use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::BlockHash;
 use bitcoin_bech32::WitnessProgram;
+use dotenv;
 use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::chain::chainmonitor;
@@ -41,6 +42,7 @@ use lightning_persister::FilesystemPersister;
 use rand::{thread_rng, Rng};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::env;
 use std::fmt;
 use std::fs;
 use std::fs::File;
@@ -58,7 +60,7 @@ pub(crate) enum HTLCStatus {
 	Failed,
 }
 
-pub(crate) struct MillisatAmount(Option<u64>);
+pub(crate) struct MillisatAmount(pub Option<u64>);
 
 impl fmt::Display for MillisatAmount {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -70,10 +72,10 @@ impl fmt::Display for MillisatAmount {
 }
 
 pub(crate) struct PaymentInfo {
-	preimage: Option<PaymentPreimage>,
-	secret: Option<PaymentSecret>,
-	status: HTLCStatus,
-	amt_msat: MillisatAmount,
+	pub preimage: Option<PaymentPreimage>,
+	pub secret: Option<PaymentSecret>,
+	pub status: HTLCStatus,
+	pub amt_msat: MillisatAmount,
 }
 
 pub(crate) type PaymentInfoStorage = Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>;
@@ -326,7 +328,7 @@ async fn handle_ldk_events(
 	}
 }
 
-async fn start_ldk() {
+pub async fn start_ldk() {
 	let args = match cli::parse_startup_args() {
 		Ok(user_args) => user_args,
 		Err(()) => return,
@@ -731,6 +733,8 @@ async fn start_ldk() {
 	)
 	.await;
 
+	// 1. Test if request args gets here
+
 	// Disconnect our peers and stop accepting new connections. This ensures we don't continue
 	// updating our channel data after we've stopped the background processor.
 	stop_listen_connect.store(true, Ordering::Release);
@@ -743,5 +747,9 @@ async fn start_ldk() {
 #[tokio::main]
 pub async fn main() {
 	println!("Starting LDK");
+	dotenv::dotenv().expect(".env file not found");
+	let key = "BITCOIND_RPC_USER";
+	println!("RPC_USER: {}", env::var(key).unwrap());
+	println!("{:?}", env::args());
 	start_ldk().await;
 }
