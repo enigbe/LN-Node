@@ -3,9 +3,11 @@ pub mod cli;
 pub mod convert;
 pub mod disk;
 pub mod hex_utils;
+pub mod server;
 
 use crate::bitcoind_client::BitcoindClient;
 use crate::disk::FilesystemLogger;
+use crate::server::NodeVariable;
 use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
@@ -720,20 +722,30 @@ pub async fn start_ldk() {
 	}
 
 	// Start the CLI.
-	cli::poll_for_user_input(
-		Arc::clone(&invoice_payer),
-		Arc::clone(&peer_manager),
-		Arc::clone(&channel_manager),
-		Arc::clone(&keys_manager),
-		Arc::clone(&network_graph),
-		inbound_payments,
-		outbound_payments,
-		ldk_data_dir.clone(),
-		network,
-	)
-	.await;
+	// cli::poll_for_user_input(
+	// 	Arc::clone(&invoice_payer),
+	// 	Arc::clone(&peer_manager),
+	// 	Arc::clone(&channel_manager),
+	// 	Arc::clone(&keys_manager),
+	// 	Arc::clone(&network_graph),
+	// 	inbound_payments,
+	// 	outbound_payments,
+	// 	ldk_data_dir.clone(),
+	// 	network,
+	// )
+	// .await;
 
-	// 1. Test if request args gets here
+	// Start server here
+	let node_var = server::NodeVariable { network };
+	match server::run(node_var).await {
+		Ok(_server) => {
+			println!("Started node server successfully");
+		}
+		Err(e) => {
+			println!("Failed to start server: {}", e);
+			// Stop the node application
+		}
+	}
 
 	// Disconnect our peers and stop accepting new connections. This ensures we don't continue
 	// updating our channel data after we've stopped the background processor.
@@ -746,10 +758,7 @@ pub async fn start_ldk() {
 
 #[tokio::main]
 pub async fn main() {
-	println!("Starting LDK");
-	dotenv::dotenv().expect(".env file not found");
-	let key = "BITCOIND_RPC_USER";
-	println!("RPC_USER: {}", env::var(key).unwrap());
-	println!("{:?}", env::args());
+	println!("Starting LDK Node");
+
 	start_ldk().await;
 }

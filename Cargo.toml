@@ -1,5 +1,5 @@
 [package]
-name = "ln-node"
+name = "lnnode"
 version = "0.1.0"
 authors = ["Enigbe Ochekliye <enigbeos@protonmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -43,10 +43,6 @@ panic = "abort"
 [[bin]]
 name = "lnnode"
 path = "src/lib/main.rs"
-
-[[bin]]
-name = "server"
-path = "src/bin/server.rs"
 
 [[bin]]
 name = "lnnode-cli"
