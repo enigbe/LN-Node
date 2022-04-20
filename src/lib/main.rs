@@ -3,6 +3,7 @@ pub mod cli;
 pub mod convert;
 pub mod disk;
 pub mod hex_utils;
+pub mod node_var;
 pub mod server;
 
 use crate::bitcoind_client::BitcoindClient;
@@ -15,7 +16,6 @@ use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::BlockHash;
 use bitcoin_bech32::WitnessProgram;
-use dotenv;
 use lightning::chain;
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::chain::chainmonitor;
@@ -56,92 +56,97 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-pub(crate) enum HTLCStatus {
-	Pending,
-	Succeeded,
-	Failed,
-}
+use node_var::{
+	ChainMonitor, ChannelManager, DataPersister, HTLCStatus, InvoicePayer, MillisatAmount,
+	PaymentInfo, PaymentInfoStorage, PeerManager, Router,
+};
 
-pub(crate) struct MillisatAmount(pub Option<u64>);
+// pub(crate) enum HTLCStatus {
+// 	Pending,
+// 	Succeeded,
+// 	Failed,
+// }
 
-impl fmt::Display for MillisatAmount {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self.0 {
-			Some(amt) => write!(f, "{}", amt),
-			None => write!(f, "unknown"),
-		}
-	}
-}
+// pub(crate) struct MillisatAmount(pub Option<u64>);
 
-pub(crate) struct PaymentInfo {
-	pub preimage: Option<PaymentPreimage>,
-	pub secret: Option<PaymentSecret>,
-	pub status: HTLCStatus,
-	pub amt_msat: MillisatAmount,
-}
+// impl fmt::Display for MillisatAmount {
+// 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+// 		match self.0 {
+// 			Some(amt) => write!(f, "{}", amt),
+// 			None => write!(f, "unknown"),
+// 		}
+// 	}
+// }
 
-pub(crate) type PaymentInfoStorage = Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>;
+// pub(crate) struct PaymentInfo {
+// 	pub preimage: Option<PaymentPreimage>,
+// 	pub secret: Option<PaymentSecret>,
+// 	pub status: HTLCStatus,
+// 	pub amt_msat: MillisatAmount,
+// }
 
-type ChainMonitor = chainmonitor::ChainMonitor<
-	InMemorySigner,
-	Arc<dyn Filter + Send + Sync>,
-	Arc<BitcoindClient>,
-	Arc<BitcoindClient>,
-	Arc<FilesystemLogger>,
-	Arc<FilesystemPersister>,
->;
+// pub(crate) type PaymentInfoStorage = Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>;
 
-pub(crate) type PeerManager = SimpleArcPeerManager<
-	SocketDescriptor,
-	ChainMonitor,
-	BitcoindClient,
-	BitcoindClient,
-	dyn chain::Access + Send + Sync,
-	FilesystemLogger,
->;
+// type ChainMonitor = chainmonitor::ChainMonitor<
+// 	InMemorySigner,
+// 	Arc<dyn Filter + Send + Sync>,
+// 	Arc<BitcoindClient>,
+// 	Arc<BitcoindClient>,
+// 	Arc<FilesystemLogger>,
+// 	Arc<FilesystemPersister>,
+// >;
 
-pub(crate) type ChannelManager =
-	SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
+// pub(crate) type PeerManager = SimpleArcPeerManager<
+// 	SocketDescriptor,
+// 	ChainMonitor,
+// 	BitcoindClient,
+// 	BitcoindClient,
+// 	dyn chain::Access + Send + Sync,
+// 	FilesystemLogger,
+// >;
 
-pub(crate) type InvoicePayer<E> = payment::InvoicePayer<
-	Arc<ChannelManager>,
-	Router,
-	Arc<Mutex<ProbabilisticScorer<Arc<NetworkGraph>>>>,
-	Arc<FilesystemLogger>,
-	E,
->;
+// pub(crate) type ChannelManager =
+// 	SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
 
-type Router = DefaultRouter<Arc<NetworkGraph>, Arc<FilesystemLogger>>;
+// pub(crate) type InvoicePayer<E> = payment::InvoicePayer<
+// 	Arc<ChannelManager>,
+// 	Router,
+// 	Arc<Mutex<ProbabilisticScorer<Arc<NetworkGraph>>>>,
+// 	Arc<FilesystemLogger>,
+// 	E,
+// >;
 
-struct DataPersister {
-	data_dir: String,
-}
+// type Router = DefaultRouter<Arc<NetworkGraph>, Arc<FilesystemLogger>>;
 
-impl
-	Persister<
-		InMemorySigner,
-		Arc<ChainMonitor>,
-		Arc<BitcoindClient>,
-		Arc<KeysManager>,
-		Arc<BitcoindClient>,
-		Arc<FilesystemLogger>,
-	> for DataPersister
-{
-	fn persist_manager(&self, channel_manager: &ChannelManager) -> Result<(), std::io::Error> {
-		FilesystemPersister::persist_manager(self.data_dir.clone(), channel_manager)
-	}
+// struct DataPersister {
+// 	data_dir: String,
+// }
 
-	fn persist_graph(&self, network_graph: &NetworkGraph) -> Result<(), std::io::Error> {
-		if FilesystemPersister::persist_network_graph(self.data_dir.clone(), network_graph).is_err()
-		{
-			// Persistence errors here are non-fatal as we can just fetch the routing graph
-			// again later, but they may indicate a disk error which could be fatal elsewhere.
-			eprintln!("Warning: Failed to persist network graph, check your disk and permissions");
-		}
+// impl
+// 	Persister<
+// 		InMemorySigner,
+// 		Arc<ChainMonitor>,
+// 		Arc<BitcoindClient>,
+// 		Arc<KeysManager>,
+// 		Arc<BitcoindClient>,
+// 		Arc<FilesystemLogger>,
+// 	> for DataPersister
+// {
+// 	fn persist_manager(&self, channel_manager: &ChannelManager) -> Result<(), std::io::Error> {
+// 		FilesystemPersister::persist_manager(self.data_dir.clone(), channel_manager)
+// 	}
 
-		Ok(())
-	}
-}
+// 	fn persist_graph(&self, network_graph: &NetworkGraph) -> Result<(), std::io::Error> {
+// 		if FilesystemPersister::persist_network_graph(self.data_dir.clone(), network_graph).is_err()
+// 		{
+// 			// Persistence errors here are non-fatal as we can just fetch the routing graph
+// 			// again later, but they may indicate a disk error which could be fatal elsewhere.
+// 			eprintln!("Warning: Failed to persist network graph, check your disk and permissions");
+// 		}
+
+// 		Ok(())
+// 	}
+// }
 
 async fn handle_ldk_events(
 	channel_manager: Arc<ChannelManager>, bitcoind_client: Arc<BitcoindClient>,
@@ -736,10 +741,13 @@ pub async fn start_ldk() {
 	// .await;
 
 	// Start server here
-	let node_var = server::NodeVariable { network };
-	match server::run(node_var).await {
-		Ok(_server) => {
+	let node_var =
+		server::NodeVariable { network, inbound_payments, outbound_payments, ldk_data_dir };
+
+	match server::run(node_var) {
+		Ok(server) => {
 			println!("Started node server successfully");
+			server.await;
 		}
 		Err(e) => {
 			println!("Failed to start server: {}", e);

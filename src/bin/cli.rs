@@ -79,7 +79,8 @@ struct PostBody {
 	command: Command,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
 	// 1. Get argument list/vector from terminal
 	let cmd_args: Vec<String> = env::args().collect();
 	if cmd_args.len() < 2 {
@@ -101,7 +102,7 @@ fn main() {
 	let req_body = serde_json::to_string(&command).unwrap();
 
 	// 4. Send request to node server
-	let server_resp = cli_client.post(url).body(req_body);
+	let server_resp = cli_client.post(url).body(req_body).send().await.unwrap();
 
 	println!("{:?}", server_resp);
 
