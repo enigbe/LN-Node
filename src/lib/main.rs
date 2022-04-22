@@ -8,7 +8,7 @@ pub mod server;
 
 use crate::bitcoind_client::BitcoindClient;
 use crate::disk::FilesystemLogger;
-use crate::server::NodeVariable;
+use crate::server::{run, NodeVar, ServerEventHandler};
 use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
@@ -606,16 +606,25 @@ pub async fn start_ldk() {
 	let network = args.network;
 	let bitcoind_rpc = bitcoind_client.clone();
 	let handle = tokio::runtime::Handle::current();
-	let event_handler = move |event: &Event| {
-		handle.block_on(handle_ldk_events(
-			channel_manager_event_listener.clone(),
-			bitcoind_rpc.clone(),
-			keys_manager_listener.clone(),
-			inbound_pmts_for_events.clone(),
-			outbound_pmts_for_events.clone(),
-			network,
-			event,
-		));
+	// let event_handler = move |event: &Event| {
+	// 	handle.block_on(handle_ldk_events(
+	// 		channel_manager_event_listener.clone(),
+	// 		bitcoind_rpc.clone(),
+	// 		keys_manager_listener.clone(),
+	// 		inbound_pmts_for_events.clone(),
+	// 		outbound_pmts_for_events.clone(),
+	// 		network,
+	// 		event,
+	// 	));
+	// };
+	let event_handler = ServerEventHandler {
+		tokio_handle: tokio::runtime::Handle::current(),
+		channel_manager: Arc::clone(&channel_manager),
+		bitcoind_client: Arc::clone(&bitcoind_client),
+		keys_manager: Arc::clone(&keys_manager),
+		inbound_payments: inbound_payments.clone(),
+		outbound_payments: outbound_payments.clone(),
+		network,
 	};
 
 	// Step 16: Initialize routing ProbabilisticScorer
@@ -728,23 +737,32 @@ pub async fn start_ldk() {
 
 	// Start the CLI.
 	// cli::poll_for_user_input(
-	// 	Arc::clone(&invoice_payer),
-	// 	Arc::clone(&peer_manager),
-	// 	Arc::clone(&channel_manager),
-	// 	Arc::clone(&keys_manager),
-	// 	Arc::clone(&network_graph),
-	// 	inbound_payments,
-	// 	outbound_payments,
-	// 	ldk_data_dir.clone(),
-	// 	network,
+	// Arc::clone(&invoice_payer),
+	// Arc::clone(&peer_manager),
+	// Arc::clone(&channel_manager),
+	// Arc::clone(&keys_manager),
+	// Arc::clone(&network_graph),
+	// inbound_payments,
+	// outbound_payments,
+	// ldk_data_dir.clone(),
+	// network,
 	// )
 	// .await;
 
 	// Start server here
-	let node_var =
-		server::NodeVariable { network, inbound_payments, outbound_payments, ldk_data_dir };
+	let node_var = NodeVar {
+		invoice_payer: Arc::clone(&invoice_payer),
+		peer_manager: Arc::clone(&peer_manager),
+		channel_manager: Arc::clone(&channel_manager),
+		keys_manager: Arc::clone(&keys_manager),
+		network_graph: Arc::clone(&network_graph),
+		inbound_payments,
+		outbound_payments,
+		ldk_data_dir: ldk_data_dir.clone(),
+		network,
+	};
 
-	match server::run(node_var) {
+	match run(node_var) {
 		Ok(server) => {
 			println!("Started node server successfully");
 			server.await;
