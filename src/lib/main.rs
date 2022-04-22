@@ -618,7 +618,6 @@ pub async fn start_ldk() {
 	// 	));
 	// };
 	let event_handler = ServerEventHandler {
-		tokio_handle: tokio::runtime::Handle::current(),
 		channel_manager: Arc::clone(&channel_manager),
 		bitcoind_client: Arc::clone(&bitcoind_client),
 		keys_manager: Arc::clone(&keys_manager),
