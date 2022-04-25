@@ -1,5 +1,5 @@
 [package]
-name = "ln-node"
+name = "lnnode"
 version = "0.1.0"
 authors = ["Enigbe Ochekliye <enigbeos@protonmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -29,8 +29,10 @@ tokio = { version = "1", features = [ "io-util", "macros", "rt", "rt-multi-threa
 
 actix-web = "4.0.1"
 config = "0.13.1"
-serde = "1.0.136"
+serde = {version = "1", features = ["derive"]}
 dotenv = "0.15.0"
+clap = "3.1.8"
+reqwest = "0.11.10"
 
 [profile.release]
 panic = "abort"
@@ -39,12 +41,12 @@ panic = "abort"
 panic = "abort"
 
 [[bin]]
-name = "ln-node"
+name = "lnnode"
 path = "src/lib/main.rs"
 
 [[bin]]
-name = "server"
-path = "src/bin/server.rs"
+name = "lnnode-cli"
+path = "src/bin/cli.rs"
 
 [lib]
 name = "lnnode"
