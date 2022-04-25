@@ -1,3 +1,4 @@
+use lnnode::server::Help;
 use reqwest;
 use serde::Serialize;
 use serde_json;
@@ -17,6 +18,7 @@ enum Command {
 	NodeInfo,
 	ListPeers,
 	SignMessage { message: String },
+	Help,
 }
 
 impl Command {
@@ -69,8 +71,22 @@ impl Command {
 				let message = cmd_input[2].to_string();
 				return Some(Command::SignMessage { message });
 			}
+			"help" => {
+				return Some(Command::Help);
+			}
 			_ => None,
 		}
+	}
+}
+
+enum ServerResp {
+	Help,
+	ListPeers,
+}
+
+impl ServerResp {
+	fn process(resp: Self) -> () {
+		todo!()
 	}
 }
 
@@ -102,10 +118,15 @@ async fn main() {
 	let req_body = serde_json::to_string(&command).unwrap();
 
 	// 4. Send request to node server
-	let server_resp = cli_client.post(url).body(req_body).send().await.unwrap();
+	let resp = cli_client.post(url).body(req_body).send().await.unwrap().json::<ServerResp>().await;
 
-	println!("{:?}", server_resp);
+	println!("{:?}", resp);
 
-	// 5. Get and process the response from server
-	// 6. Print server response to terminal
+	// 5. Match the response to designed enum types and process accordingly
+	match ServerResp::process(resp) {
+		ServerResp::Help => {}
+		ServerResp::ListPeers => {}
+		_ => {}
+	}
+	// 6. Write server response to terminal
 }

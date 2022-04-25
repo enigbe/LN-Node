@@ -1,31 +1,18 @@
 use crate::bitcoind_client::BitcoindClient;
-use crate::hex_utils;
-use crate::node_var::{
-	ChannelManager, HTLCStatus, InvoicePayer, MillisatAmount, PaymentInfo, PaymentInfoStorage,
-	PeerManager,
-};
+use crate::handle_ldk_events;
+use crate::node_var::{ChannelManager, InvoicePayer, PaymentInfoStorage, PeerManager};
 use actix_web::dev::Server;
 use actix_web::{http::header::ContentType, web, App, HttpRequest, HttpResponse, HttpServer};
 use bitcoin::network::constants::Network;
-use futures::executor::block_on;
-use std::io;
-// use bitcoin::secp256k1::PublicKey;
-use crate::handle_ldk_events;
-use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::consensus::encode;
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin_bech32::WitnessProgram;
-use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
+use bitcoin::secp256k1::PublicKey;
 use lightning::chain::keysinterface::KeysManager;
+use lightning::ln::channelmanager::ChannelDetails;
+use lightning::ln::msgs::ChannelAnnouncement;
 use lightning::routing::network_graph::NetworkGraph;
-use lightning::util::events::{Event, EventHandler, PaymentPurpose};
-use rand::{thread_rng, Rng};
-use serde::Serialize;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::io::Write;
+use lightning::util::events::{Event, EventHandler};
+use serde::{Deserialize, Serialize};
+use std::string::String;
 use std::sync::Arc;
-use std::time::Duration;
 
 // Node variables passed to application state
 #[derive(Clone)]
@@ -69,25 +56,56 @@ impl EventHandler for ServerEventHandler {
 }
 
 // NodeInfo struct
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct NodeInfo {
-	// pubkey: String,
-	// channel_list: Vec<ChannelDetails>,
+	pubkey: PublicKey,
+	channel_list: Vec<ChannelDetails>,
 	channels_number: usize,
 	usable_channels_number: usize,
 	local_balance_msat: u64,
 	peers: usize,
 }
 
-/// Get help information on how to query the node
-async fn help(req: HttpRequest) -> HttpResponse {
-	// 1. Get path, i.e. "help"
-	let path = req.path().to_owned();
-	// 2. Get additional data from request body if presented/required
-	// 3. Send data into an server-dedicated channel on the node that is waiting for input
-	// 4. Get response from node and send back to CLI client
-	println!("node network: {:?}", path);
-	HttpResponse::Ok().finish()
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Help {
+	openchannel: String,
+	sendpayment: String,
+	getinvoice: String,
+	connectpeer: String,
+	listchannels: String,
+	listpayments: String,
+	closechannel: String,
+	forceclosechannel: String,
+	nodeinfo: String,
+	listpeers: String,
+	signmessage: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ListPeers {
+	peers: Vec<PublicKey>,
+}
+
+/// Get helpful information on how to interact with the lightning node
+async fn help(_req: HttpRequest) -> HttpResponse {
+	// 1. Return a JSON body with key-value pairs where the keys are the commands
+	//	  and the bodies are the command parameters
+	// 1.1 Construct HelpCommand instance
+	let help = Help {
+		openchannel: "pubkey@host:port <amt_satoshis>".to_string(),
+		sendpayment: "<invoice>".to_string(),
+		getinvoice: "<amt_millisatoshis>".to_string(),
+		connectpeer: "pubkey@host:port".to_string(),
+		listchannels: "".to_string(),
+		listpayments: "".to_string(),
+		closechannel: "<channel_id>".to_string(),
+		forceclosechannel: "<channel_id>".to_string(),
+		nodeinfo: "".to_string(),
+		listpeers: "".to_string(),
+		signmessage: "<message>".to_string(),
+	};
+	// 1.2 Return response
+	HttpResponse::Ok().content_type(ContentType::json()).json(help)
 }
 
 /// Get node information
@@ -103,7 +121,8 @@ async fn nodeinfo(
 
 	// Construct response body and return response
 	let nodeinfo_obj = NodeInfo {
-		// pubkey,
+		pubkey,
+		channel_list,
 		channels_number,
 		usable_channels_number,
 		local_balance_msat,
@@ -111,11 +130,20 @@ async fn nodeinfo(
 	};
 
 	HttpResponse::Ok().content_type(ContentType::json()).json(nodeinfo_obj)
+	// HttpResponse::Ok().finish()
 }
 
 /// List node peers
-async fn list_peers() -> HttpResponse {
-	HttpResponse::Ok().finish()
+async fn list_peers(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpResponse {
+	let peers = node_var.peer_manager.get_peer_node_ids();
+	if peers.len() == 0 {
+		// 1. Return empty list of peers
+		let list_peers = ListPeers { peers: Vec::new() };
+		return HttpResponse::Ok().content_type(ContentType::json()).json(list_peers);
+	} else {
+		let list_peers = ListPeers { peers };
+		return HttpResponse::Ok().content_type(ContentType::json()).json(list_peers);
+	}
 }
 
 /// Connect another node to running node
