@@ -1,6 +1,5 @@
-use lnnode::server::Help;
 use reqwest;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
@@ -79,13 +78,15 @@ impl Command {
 	}
 }
 
+#[derive(Debug, Deserialize)]
 enum ServerResp {
 	Help,
 	ListPeers,
+	ListChannels,
 }
 
 impl ServerResp {
-	fn process(resp: Self) -> () {
+	fn process(resp: Result<Self, reqwest::Error>) -> () {
 		todo!()
 	}
 }
@@ -123,10 +124,5 @@ async fn main() {
 	println!("{:?}", resp);
 
 	// 5. Match the response to designed enum types and process accordingly
-	match ServerResp::process(resp) {
-		ServerResp::Help => {}
-		ServerResp::ListPeers => {}
-		_ => {}
-	}
 	// 6. Write server response to terminal
 }
