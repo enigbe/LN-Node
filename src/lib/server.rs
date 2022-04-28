@@ -127,10 +127,11 @@ pub struct ListChannels {
 // openchannel request struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OpenChannel {
-	pubkey: PublicKey,
+	pubkey: String,
 	host: String,
 	port: String,
-	amt_satoshis: String,
+	channel_amt_satoshis: String,
+	channel_announcement: Option<String>,
 }
 
 // connectpeer struct
@@ -202,32 +203,94 @@ async fn help(_req: HttpRequest) -> HttpResponse {
 async fn open_channel(
 	req: web::Json<OpenChannel>, node_var: web::Data<NodeVar<ServerEventHandler>>,
 ) -> HttpResponse {
-	let pubkey = &req.pubkey;
-	let host = &req.host;
-	let port = &req.port;
-	let amt_satoshis = &req.amt_satoshis.parse::<u64>().unwrap();
-	let announced_channel = true;
-	let channel_manager = &node_var.channel_manager;
+	let pubkey = req.pubkey.clone();
+	let host = req.host.clone();
+	let port = req.port.clone();
+	let channel_amt_satoshis = req.channel_amt_satoshis.clone();
+	let channel_announcement = req.channel_announcement.clone();
+	let peer_manager = node_var.peer_manager.clone();
 
-	let config = UserConfig {
-		peer_channel_config_limits: ChannelHandshakeLimits {
-			their_to_self_delay: 2016,
-			..Default::default()
-		},
-		channel_options: ChannelConfig { announced_channel, ..Default::default() },
-		..Default::default()
-	};
+	// Validate critical (required) user arguments
+	if pubkey == "".to_string()
+		|| host == "".to_string()
+		|| port == "".to_string()
+		|| channel_amt_satoshis == "".to_string()
+	{
+		let error = ServerError {
+			error: format!("ERROR: openchannel has 2 required arguments: `openchannel pubkey@host:port channel_amt_satoshis` [--public]").to_string(),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
 
-	match channel_manager.create_channel(*pubkey, *amt_satoshis, 0, 0, Some(config)) {
-		Ok(_) => {
-			let msg =
-				ServerSuccess { msg: format!("Channel successfully opened with: {}", pubkey) };
-			println!("EVENT: initiated channel with peer {}. ", pubkey);
-			return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+	// Get public key and socket address from supplied parameters
+	let peer_pubkey_and_ip_addr = format!("{}@{}:{}", pubkey, host, port);
+	match parse_peer_info(peer_pubkey_and_ip_addr) {
+		Ok(info) => {
+			// convert channel_amt_satoshi to u64
+			let chan_amt_sat = channel_amt_satoshis.parse::<u64>();
+			if chan_amt_sat.is_err() {
+				let error =
+					ServerError { error: "ERROR: channel amount must be a number".to_string() };
+				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+			}
+
+			if connect_peer_if_necessary(info.0, info.1, peer_manager).await.is_err() {
+				let error = ServerError { error: "ERROR: cannot connect to peer".to_string() };
+				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+			}
+
+			// Get the boolean value to announce a channel or not
+			let announced_channel = match channel_announcement {
+				Some(val) => {
+					if val.as_str() == "true" {
+						true
+					} else if val.as_str() == "false" {
+						false
+					} else {
+						false
+					}
+				}
+				None => false,
+			};
+
+			// open channel
+			let config = UserConfig {
+				peer_channel_config_limits: ChannelHandshakeLimits {
+					// lnd's max to_self_delay is 2016, so we want to be compatible.
+					their_to_self_delay: 2016,
+					..Default::default()
+				},
+				channel_options: ChannelConfig { announced_channel, ..Default::default() },
+				..Default::default()
+			};
+
+			let peer_pubkey = info.0;
+			let channel_manager = node_var.channel_manager.clone();
+			match channel_manager.create_channel(
+				peer_pubkey,
+				chan_amt_sat.unwrap(),
+				0,
+				0,
+				Some(config),
+			) {
+				Ok(_) => {
+					let msg = ServerSuccess {
+						msg: format!("EVENT: initiated channel with peer {}. ", peer_pubkey),
+					};
+					return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+				}
+				Err(e) => {
+					let error =
+						ServerError { error: format!("ERROR: failed to open channel: {:?}", e) };
+					return HttpResponse::BadRequest()
+						.content_type(ContentType::json())
+						.json(error);
+				}
+			}
 		}
 		Err(e) => {
-			let error = ServerError { error: format!("{:?}", e) };
-			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
+			let error = ServerError { error: format!("ERROR: {}", e) };
+			return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 		}
 	}
 }
@@ -351,7 +414,7 @@ async fn connect_peer(
 	let port = format!("{}", req.port);
 	let peer_pubkey_host_port = format!("{}@{}:{}", pubkey, host, port);
 
-	if pubkey == "" || host == "" || port == "" {
+	if pubkey == "".to_string() || host == "".to_string() || port == "".to_string() {
 		let error = ServerError {
 			error:
 				"ERROR: connectpeer requires peer connection info: `connectpeer pubkey@host:port`"

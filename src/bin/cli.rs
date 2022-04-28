@@ -31,6 +31,7 @@ impl Command {
 		let arg = cmd_input[1].trim().to_lowercase();
 		match arg.as_str() {
 			"openchannel" => {
+				// TODO: parse optional `public` parameter
 				let channel_info_parts: Vec<&str> = cmd_input[2].split("@").collect();
 				let host_info_parts: Vec<&str> = channel_info_parts[1].split(":").collect();
 				let pub_key = channel_info_parts[0].to_string();
