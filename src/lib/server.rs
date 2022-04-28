@@ -19,7 +19,8 @@ use lightning::util::config::ChannelConfig;
 use lightning::util::config::ChannelHandshakeLimits;
 use lightning::util::config::UserConfig;
 use lightning::util::events::{Event, EventHandler};
-use lightning_invoice::{utils, Currency};
+use lightning_invoice::payment::PaymentError;
+use lightning_invoice::{utils, Currency, Invoice};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::ops::Deref;
@@ -148,7 +149,7 @@ pub struct GetInvoice {
 
 // invoice/payment request struct
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Invoice {
+pub struct ServerInvoice {
 	invoice: String,
 }
 
@@ -435,7 +436,7 @@ async fn get_invoice(
 				},
 			);
 
-			let inv_str = Invoice { invoice: format!("{}", inv) };
+			let inv_str = ServerInvoice { invoice: format!("{}", inv) };
 			return HttpResponse::Ok().content_type(ContentType::json()).json(inv_str);
 		}
 		Err(e) => {
@@ -447,9 +448,51 @@ async fn get_invoice(
 
 /// Send payment
 async fn send_payment(
-	req: web::Json<GetInvoice>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+	req: web::Json<ServerInvoice>, node_var: web::Data<NodeVar<ServerEventHandler>>,
 ) -> HttpResponse {
-	todo!()
+	let invoice = req.invoice.parse::<Invoice>().unwrap();
+	let invoice_payer = node_var.invoice_payer.clone();
+	let payment_storage = node_var.outbound_payments.clone();
+
+	let payment_id = invoice_payer.pay_invoice(&invoice);
+	match payment_id {
+		Ok(_payment_id) => {
+			let payee_pubkey = invoice.recover_payee_pub_key();
+			let amt_msat = invoice.amount_milli_satoshis().unwrap();
+
+			let status = HTLCStatus::Pending;
+
+			let payment_hash = PaymentHash(invoice.payment_hash().clone().into_inner());
+			let payment_secret = Some(invoice.payment_secret().clone());
+
+			let mut payments = payment_storage.lock().unwrap();
+			payments.insert(
+				payment_hash,
+				PaymentInfo {
+					preimage: None,
+					secret: payment_secret,
+					status,
+					amt_msat: MillisatAmount(invoice.amount_milli_satoshis()),
+				},
+			);
+			let payment_msg = ServerSuccess {
+				msg: format!("EVENT: initiated sending {} msats to {}", amt_msat, payee_pubkey),
+			};
+			return HttpResponse::Ok().content_type(ContentType::json()).json(payment_msg);
+		}
+		Err(PaymentError::Invoice(e)) => {
+			let error = ServerError { error: format!("ERROR: invalid invoice: {}", e) };
+			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
+		}
+		Err(PaymentError::Routing(e)) => {
+			let error = ServerError { error: format!("ERROR: failed to find route: {}", e.err) };
+			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
+		}
+		Err(PaymentError::Sending(e)) => {
+			let error = ServerError { error: format!("ERROR: failed to send payment: {:?}", e) };
+			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
+		}
+	}
 }
 
 /// List payments
