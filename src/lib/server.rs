@@ -2,21 +2,24 @@ use crate::bitcoind_client::BitcoindClient;
 use crate::cli::{connect_peer_if_necessary, parse_peer_info, sanitize_string};
 use crate::handle_ldk_events;
 use crate::hex_utils;
-use crate::node_var::{ChannelManager, InvoicePayer, PaymentInfoStorage, PeerManager};
+use crate::node_var::{
+	ChannelManager, HTLCStatus, InvoicePayer, MillisatAmount, PaymentInfo, PaymentInfoStorage,
+	PeerManager,
+};
 use actix_web::dev::Server;
 use actix_web::{http::header::ContentType, web, App, HttpRequest, HttpResponse, HttpServer};
-use bitcoin::hash_types::Txid;
+use bitcoin::hashes::Hash;
 use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::PublicKey;
 use lightning::chain::keysinterface::KeysManager;
-use lightning::ln::channelmanager::ChannelDetails;
-use lightning::ln::msgs::ChannelAnnouncement;
+use lightning::ln::PaymentHash;
 use lightning::routing::network_graph::NetworkGraph;
 use lightning::routing::network_graph::NodeId;
 use lightning::util::config::ChannelConfig;
 use lightning::util::config::ChannelHandshakeLimits;
 use lightning::util::config::UserConfig;
 use lightning::util::events::{Event, EventHandler};
+use lightning_invoice::{utils, Currency};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::string::String;
@@ -40,6 +43,7 @@ where
 }
 
 pub struct ServerEventHandler {
+	pub tokio_handle: tokio::runtime::Handle,
 	pub channel_manager: Arc<ChannelManager>,
 	pub bitcoind_client: Arc<BitcoindClient>,
 	pub keys_manager: Arc<KeysManager>,
@@ -50,8 +54,7 @@ pub struct ServerEventHandler {
 
 impl EventHandler for ServerEventHandler {
 	fn handle_event(&self, event: &Event) {
-		let handle = tokio::runtime::Handle::current();
-		handle.block_on(handle_ldk_events(
+		self.tokio_handle.block_on(handle_ldk_events(
 			self.channel_manager.clone(),
 			self.bitcoind_client.clone(),
 			self.keys_manager.clone(),
@@ -136,6 +139,22 @@ pub struct ConnectPeer {
 	port: String,
 }
 
+// getinvoice struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetInvoice {
+	amt_millisatoshis: String,
+}
+
+// invoice/payment request struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Invoice {
+	payment_hash: String,
+	preimage: String,
+	secret: String,
+	status: HTLCStatus,
+	amt_msat: MillisatAmount,
+}
+
 // Server Error
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerError {
@@ -188,12 +207,13 @@ async fn open_channel(
 
 	match channel_manager.create_channel(*pubkey, *amt_satoshis, 0, 0, Some(config)) {
 		Ok(_) => {
+			let msg =
+				ServerSuccess { msg: format!("Channel successfully opened with: {}", pubkey) };
 			println!("EVENT: initiated channel with peer {}. ", pubkey);
-			return HttpResponse::Ok().content_type(ContentType::json()).json(pubkey);
+			return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
 		}
 		Err(e) => {
 			let error = ServerError { error: format!("{:?}", e) };
-			println!("ERROR: failed to open channel: {:?}", e);
 			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
 		}
 	}
@@ -221,7 +241,6 @@ async fn nodeinfo(
 	};
 
 	HttpResponse::Ok().content_type(ContentType::json()).json(nodeinfo_obj)
-	// HttpResponse::Ok().finish()
 }
 
 /// List connected node peers
@@ -327,12 +346,18 @@ async fn connect_peer(
 		};
 		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 	} else {
-		match parse_peer_info(peer_pubkey_host_port) {
+		let pubkey_peer_addr = parse_peer_info(peer_pubkey_host_port);
+		match pubkey_peer_addr {
 			Ok(info) => {
 				if connect_peer_if_necessary(info.0, info.1, peer_manager).await.is_ok() {
 					let msg =
 						ServerSuccess { msg: format!("SUCCESS: connected to peer {}", info.0) };
 					return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+				} else {
+					let error = ServerError { error: "Failed to connect to peer".to_string() };
+					return HttpResponse::BadRequest()
+						.content_type(ContentType::json())
+						.json(error);
 				}
 			}
 			Err(e) => {
@@ -341,6 +366,86 @@ async fn connect_peer(
 			}
 		};
 	}
+}
+
+/// Get invoice
+async fn get_invoice(
+	req: web::Json<GetInvoice>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let amt_str = format!("{}", req.amt_millisatoshis);
+	if amt_str == "" {
+		let error = ServerError {
+			error: "ERROR: getinvoice requires an amount in millisatoshis".to_string(),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let amt_msat: Result<u64, _> = amt_str.parse();
+	if amt_msat.is_err() {
+		let error = ServerError {
+			error: "ERROR: getinvoice provided payment amount was not a number".to_string(),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let inbound_payments = node_var.inbound_payments.clone();
+	let channel_manager = node_var.channel_manager.clone();
+	let keys_manager = node_var.keys_manager.clone();
+	let network = node_var.network;
+
+	let mut payments = inbound_payments.lock().unwrap();
+	let currency = match network {
+		Network::Bitcoin => Currency::Bitcoin,
+		Network::Testnet => Currency::BitcoinTestnet,
+		Network::Regtest => Currency::Regtest,
+		Network::Signet => Currency::Signet,
+	};
+
+	let amt_msat = amt_msat.unwrap();
+	let invoice = utils::create_invoice_from_channelmanager(
+		&channel_manager,
+		keys_manager,
+		currency,
+		Some(amt_msat),
+		"ln-node".to_string(),
+	);
+
+	match invoice {
+		Ok(inv) => {
+			let payment_hash = PaymentHash(inv.payment_hash().clone().into_inner());
+			payments.insert(
+				payment_hash,
+				PaymentInfo {
+					preimage: None,
+					secret: Some(inv.payment_secret().clone()),
+					status: HTLCStatus::Pending,
+					amt_msat: MillisatAmount(Some(amt_msat)),
+				},
+			);
+
+			let x: &[_] = &['\\', '"'];
+			let payment_hash_string =
+				hex_utils::hex_str(&payment_hash.0).trim_matches(x).to_string();
+			let payment_request = Invoice {
+				payment_hash: format!("{:?}", payment_hash_string),
+				preimage: "".to_string(),
+				secret: format!("{:?}", Some(inv.payment_secret().clone())),
+				status: HTLCStatus::Pending,
+				amt_msat: MillisatAmount(Some(amt_msat)),
+			};
+			return HttpResponse::Ok().content_type(ContentType::json()).json(payment_request);
+		}
+		Err(e) => {
+			let error = ServerError { error: format!("ERROR: failed to create invoice: {:?}", e) };
+			return HttpResponse::Ok().content_type(ContentType::json()).json(error);
+		}
+	}
+}
+
+/// Send payment
+async fn send_payment(
+	req: web::Json<GetInvoice>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
 	todo!()
 }
 
@@ -360,6 +465,8 @@ pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, 
 			.route("/help", web::post().to(help))
 			.route("/listchannels", web::post().to(list_channels))
 			.route("/listpeers", web::post().to(list_peers))
+			.route("/getinvoice", web::post().to(get_invoice))
+			.route("/sendpayment", web::post().to(send_payment))
 			.app_data(node_var.clone())
 	})
 	.listen(listener)?

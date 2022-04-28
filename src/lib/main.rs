@@ -532,6 +532,7 @@ pub async fn start_ldk() {
 	// 	));
 	// };
 	let event_handler = ServerEventHandler {
+		tokio_handle: handle.clone(),
 		channel_manager: Arc::clone(&channel_manager),
 		bitcoind_client: Arc::clone(&bitcoind_client),
 		keys_manager: Arc::clone(&keys_manager),
@@ -677,7 +678,7 @@ pub async fn start_ldk() {
 
 	match run(node_var, "127.0.0.1:0") {
 		Ok(server) => {
-			println!("Started node server successfully");
+			println!("Starting node server");
 			server.await;
 		}
 		Err(e) => {

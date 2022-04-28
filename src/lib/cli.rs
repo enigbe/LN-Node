@@ -650,7 +650,7 @@ fn keysend<E: EventHandler, K: KeysInterface>(
 	);
 }
 
-fn get_invoice(
+pub fn get_invoice(
 	amt_msat: u64, payment_storage: PaymentInfoStorage, channel_manager: Arc<ChannelManager>,
 	keys_manager: Arc<KeysManager>, network: Network,
 ) {
