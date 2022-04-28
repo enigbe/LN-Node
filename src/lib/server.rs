@@ -22,6 +22,7 @@ use lightning::util::events::{Event, EventHandler};
 use lightning_invoice::{utils, Currency};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
+use std::ops::Deref;
 use std::string::String;
 use std::sync::Arc;
 
@@ -148,11 +149,22 @@ pub struct GetInvoice {
 // invoice/payment request struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Invoice {
+	invoice: String,
+}
+
+// payment struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Payment {
+	amount_millisatoshis: String,
 	payment_hash: String,
-	preimage: String,
-	secret: String,
-	status: HTLCStatus,
-	amt_msat: MillisatAmount,
+	htlc_direction: String,
+	htlc_status: String,
+}
+
+// payments struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Payments {
+	payments: Vec<Payment>,
 }
 
 // Server Error
@@ -423,17 +435,8 @@ async fn get_invoice(
 				},
 			);
 
-			let x: &[_] = &['\\', '"'];
-			let payment_hash_string =
-				hex_utils::hex_str(&payment_hash.0).trim_matches(x).to_string();
-			let payment_request = Invoice {
-				payment_hash: format!("{:?}", payment_hash_string),
-				preimage: "".to_string(),
-				secret: format!("{:?}", Some(inv.payment_secret().clone())),
-				status: HTLCStatus::Pending,
-				amt_msat: MillisatAmount(Some(amt_msat)),
-			};
-			return HttpResponse::Ok().content_type(ContentType::json()).json(payment_request);
+			let inv_str = Invoice { invoice: format!("{}", inv) };
+			return HttpResponse::Ok().content_type(ContentType::json()).json(inv_str);
 		}
 		Err(e) => {
 			let error = ServerError { error: format!("ERROR: failed to create invoice: {:?}", e) };
@@ -447,6 +450,45 @@ async fn send_payment(
 	req: web::Json<GetInvoice>, node_var: web::Data<NodeVar<ServerEventHandler>>,
 ) -> HttpResponse {
 	todo!()
+}
+
+/// List payments
+async fn list_payments(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpResponse {
+	let inbound = node_var.inbound_payments.lock().unwrap();
+	let outbound = node_var.outbound_payments.lock().unwrap();
+
+	// 1. create payments vector
+	let mut payments_vec: Vec<Payment> = Vec::new();
+	// 2. loop through inbound and outbound payments and append payments to vec
+	for (payment_hash, payment_info) in inbound.deref() {
+		let payment = Payment {
+			amount_millisatoshis: format!("{}", payment_info.amt_msat),
+			payment_hash: hex_utils::hex_str(&payment_hash.0),
+			htlc_direction: "inbound".to_string(),
+			htlc_status: match payment_info.status {
+				HTLCStatus::Pending => "pending".to_string(),
+				HTLCStatus::Succeeded => "succeeded".to_string(),
+				HTLCStatus::Failed => "failed".to_string(),
+			},
+		};
+		payments_vec.push(payment);
+	}
+
+	for (payment_hash, payment_info) in outbound.deref() {
+		let payment = Payment {
+			amount_millisatoshis: format!("{}", payment_info.amt_msat),
+			payment_hash: hex_utils::hex_str(&payment_hash.0),
+			htlc_direction: "outbound".to_string(),
+			htlc_status: match payment_info.status {
+				HTLCStatus::Pending => "pending".to_string(),
+				HTLCStatus::Succeeded => "succeeded".to_string(),
+				HTLCStatus::Failed => "failed".to_string(),
+			},
+		};
+		payments_vec.push(payment);
+	}
+	let payments = Payments { payments: payments_vec };
+	return HttpResponse::Ok().content_type(ContentType::json()).json(payments);
 }
 
 /// Run the server
@@ -467,6 +509,7 @@ pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, 
 			.route("/listpeers", web::post().to(list_peers))
 			.route("/getinvoice", web::post().to(get_invoice))
 			.route("/sendpayment", web::post().to(send_payment))
+			.route("/listpayments", web::post().to(list_payments))
 			.app_data(node_var.clone())
 	})
 	.listen(listener)?
