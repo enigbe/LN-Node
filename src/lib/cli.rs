@@ -496,7 +496,7 @@ fn list_payments(inbound_payments: PaymentInfoStorage, outbound_payments: Paymen
 	println!("]");
 }
 
-pub(crate) async fn connect_peer_if_necessary(
+pub async fn connect_peer_if_necessary(
 	pubkey: PublicKey, peer_addr: SocketAddr, peer_manager: Arc<PeerManager>,
 ) -> Result<(), ()> {
 	for node_pubkey in peer_manager.get_peer_node_ids() {
@@ -704,7 +704,7 @@ fn force_close_channel(channel_id: [u8; 32], channel_manager: Arc<ChannelManager
 	}
 }
 
-pub(crate) fn parse_peer_info(
+pub fn parse_peer_info(
 	peer_pubkey_and_ip_addr: String,
 ) -> Result<(PublicKey, SocketAddr), std::io::Error> {
 	let mut pubkey_and_addr = peer_pubkey_and_ip_addr.split("@");

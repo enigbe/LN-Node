@@ -1,3 +1,4 @@
+use lnnode::server::{Help, ListPeers};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -35,7 +36,7 @@ impl Command {
 				let pub_key = channel_info_parts[0].to_string();
 				let host = host_info_parts[0].to_string();
 				let port = host_info_parts[1].to_string();
-				let amount_satoshis = cmd_input[2].clone();
+				let amount_satoshis = cmd_input[3].clone();
 				return Some(Command::OpenChannel { pub_key, host, port, amount_satoshis });
 			}
 			"sendpayment" => {
@@ -119,7 +120,8 @@ async fn main() {
 	let req_body = serde_json::to_string(&command).unwrap();
 
 	// 4. Send request to node server
-	let resp = cli_client.post(url).body(req_body).send().await.unwrap().json::<ServerResp>().await;
+	// let resp = cli_client.post(url).body(req_body).send().await.unwrap().json::<ServerResp>().await;
+	let resp = cli_client.post(url).body(req_body).send().await.unwrap();
 
 	println!("{:?}", resp);
 

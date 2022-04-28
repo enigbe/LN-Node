@@ -1,5 +1,5 @@
 use crate::bitcoind_client::BitcoindClient;
-use crate::cli::sanitize_string;
+use crate::cli::{connect_peer_if_necessary, parse_peer_info, sanitize_string};
 use crate::handle_ldk_events;
 use crate::hex_utils;
 use crate::node_var::{ChannelManager, InvoicePayer, PaymentInfoStorage, PeerManager};
@@ -13,8 +13,12 @@ use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::ChannelAnnouncement;
 use lightning::routing::network_graph::NetworkGraph;
 use lightning::routing::network_graph::NodeId;
+use lightning::util::config::ChannelConfig;
+use lightning::util::config::ChannelHandshakeLimits;
+use lightning::util::config::UserConfig;
 use lightning::util::events::{Event, EventHandler};
 use serde::{Deserialize, Serialize};
+use std::net::TcpListener;
 use std::string::String;
 use std::sync::Arc;
 
@@ -73,23 +77,23 @@ pub struct NodeInfo {
 // Help command struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Help {
-	openchannel: String,
-	sendpayment: String,
-	getinvoice: String,
-	connectpeer: String,
-	listchannels: String,
-	listpayments: String,
-	closechannel: String,
-	forceclosechannel: String,
-	nodeinfo: String,
-	listpeers: String,
-	signmessage: String,
+	pub openchannel: String,
+	pub sendpayment: String,
+	pub getinvoice: String,
+	pub connectpeer: String,
+	pub listchannels: String,
+	pub listpayments: String,
+	pub closechannel: String,
+	pub forceclosechannel: String,
+	pub nodeinfo: String,
+	pub listpeers: String,
+	pub signmessage: String,
 }
 
 // Struct containing the list of peers a node has
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListPeers {
-	peers: Vec<PublicKey>,
+	pub peers: Vec<PublicKey>,
 }
 
 // Struct containing redefined channel details
@@ -115,6 +119,35 @@ pub struct ListChannels {
 	channels: Vec<RedefinedChannelDetails>,
 }
 
+// openchannel request struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OpenChannel {
+	pubkey: PublicKey,
+	host: String,
+	port: String,
+	amt_satoshis: String,
+}
+
+// connectpeer struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ConnectPeer {
+	pubkey: PublicKey,
+	host: String,
+	port: String,
+}
+
+// Server Error
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ServerError {
+	error: String,
+}
+
+// Server suceess
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ServerSuccess {
+	msg: String,
+}
+
 /// Get helpful information on how to interact with the lightning node
 async fn help(_req: HttpRequest) -> HttpResponse {
 	let help = Help {
@@ -131,6 +164,39 @@ async fn help(_req: HttpRequest) -> HttpResponse {
 		signmessage: "<message>".to_string(),
 	};
 	HttpResponse::Ok().content_type(ContentType::json()).json(help)
+}
+
+/// Open channel with another node
+async fn open_channel(
+	req: web::Json<OpenChannel>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let pubkey = &req.pubkey;
+	let host = &req.host;
+	let port = &req.port;
+	let amt_satoshis = &req.amt_satoshis.parse::<u64>().unwrap();
+	let announced_channel = true;
+	let channel_manager = &node_var.channel_manager;
+
+	let config = UserConfig {
+		peer_channel_config_limits: ChannelHandshakeLimits {
+			their_to_self_delay: 2016,
+			..Default::default()
+		},
+		channel_options: ChannelConfig { announced_channel, ..Default::default() },
+		..Default::default()
+	};
+
+	match channel_manager.create_channel(*pubkey, *amt_satoshis, 0, 0, Some(config)) {
+		Ok(_) => {
+			println!("EVENT: initiated channel with peer {}. ", pubkey);
+			return HttpResponse::Ok().content_type(ContentType::json()).json(pubkey);
+		}
+		Err(e) => {
+			let error = ServerError { error: format!("{:?}", e) };
+			println!("ERROR: failed to open channel: {:?}", e);
+			return HttpResponse::ExpectationFailed().content_type(ContentType::json()).json(error);
+		}
+	}
 }
 
 /// Get node information
@@ -243,17 +309,60 @@ async fn list_channels(node_var: web::Data<NodeVar<ServerEventHandler>>) -> Http
 	}
 }
 
-pub fn run(node_var: NodeVar<ServerEventHandler>) -> Result<Server, std::io::Error> {
+/// Connect to another peer
+async fn connect_peer(
+	req: web::Json<ConnectPeer>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let peer_manager = node_var.peer_manager.clone();
+	let pubkey = format!("{}", req.pubkey);
+	let host = format!("{}", req.host);
+	let port = format!("{}", req.port);
+	let peer_pubkey_host_port = format!("{}@{}:{}", pubkey, host, port);
+
+	if pubkey == "" || host == "" || port == "" {
+		let error = ServerError {
+			error:
+				"ERROR: connectpeer requires peer connection info: `connectpeer pubkey@host:port`"
+					.to_string(),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	} else {
+		match parse_peer_info(peer_pubkey_host_port) {
+			Ok(info) => {
+				if connect_peer_if_necessary(info.0, info.1, peer_manager).await.is_ok() {
+					let msg =
+						ServerSuccess { msg: format!("SUCCESS: connected to peer {}", info.0) };
+					return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+				}
+			}
+			Err(e) => {
+				let error = ServerError { error: e.into_inner().unwrap().to_string() };
+				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+			}
+		};
+	}
+	todo!()
+}
+
+/// Run the server
+pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, std::io::Error> {
 	let node_var = web::Data::new(node_var);
+	let listener = TcpListener::bind(addr).expect("Failed to bind on random port");
+	let port = listener.local_addr().unwrap().port();
+
+	println!("Server port: {}", port);
+
 	let server = HttpServer::new(move || {
 		App::new()
 			.route("/nodeinfo", web::post().to(nodeinfo))
+			.route("/connectpeer", web::post().to(connect_peer))
+			.route("/openchannel", web::post().to(open_channel))
 			.route("/help", web::post().to(help))
 			.route("/listchannels", web::post().to(list_channels))
 			.route("/listpeers", web::post().to(list_peers))
 			.app_data(node_var.clone())
 	})
-	.bind("127.0.0.1:8080")?
+	.listen(listener)?
 	.run();
 
 	Ok(server)
