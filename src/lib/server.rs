@@ -1,11 +1,12 @@
 use crate::bitcoind_client::BitcoindClient;
+use crate::cli;
 use crate::cli::{connect_peer_if_necessary, parse_peer_info, sanitize_string};
-use crate::handle_ldk_events;
 use crate::hex_utils;
 use crate::node_var::{
 	ChannelManager, HTLCStatus, InvoicePayer, MillisatAmount, PaymentInfo, PaymentInfoStorage,
 	PeerManager,
 };
+use crate::{disk, handle_ldk_events};
 use actix_web::dev::Server;
 use actix_web::{http::header::ContentType, web, App, HttpRequest, HttpResponse, HttpServer};
 use bitcoin::hashes::Hash;
@@ -24,6 +25,7 @@ use lightning_invoice::{utils, Currency, Invoice};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use std::ops::Deref;
+use std::path::Path;
 use std::string::String;
 use std::sync::Arc;
 
@@ -224,28 +226,26 @@ async fn open_channel(
 
 	// Get public key and socket address from supplied parameters
 	let peer_pubkey_and_ip_addr = format!("{}@{}:{}", pubkey, host, port);
-	match parse_peer_info(peer_pubkey_and_ip_addr) {
+	let pubkey_peeraddr = parse_peer_info(peer_pubkey_and_ip_addr.to_string());
+
+	match pubkey_peeraddr {
 		Ok(info) => {
-			// convert channel_amt_satoshi to u64
-			let chan_amt_sat = channel_amt_satoshis.parse::<u64>();
+			let chan_amt_sat: Result<u64, _> = channel_amt_satoshis.parse();
 			if chan_amt_sat.is_err() {
 				let error =
-					ServerError { error: "ERROR: channel amount must be a number".to_string() };
+					ServerError { error: format!("ERROR: channel amount must be a number") };
 				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 			}
 
-			if connect_peer_if_necessary(info.0, info.1, peer_manager).await.is_err() {
-				let error = ServerError { error: "ERROR: cannot connect to peer".to_string() };
+			if connect_peer_if_necessary(info.0, info.1, peer_manager.clone()).await.is_err() {
+				let error = ServerError { error: format!("ERROR: cannot connect to peer") };
 				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
-			}
+			};
 
-			// Get the boolean value to announce a channel or not
-			let announced_channel = match channel_announcement {
+			let announce_channel = match channel_announcement {
 				Some(val) => {
 					if val.as_str() == "true" {
 						true
-					} else if val.as_str() == "false" {
-						false
 					} else {
 						false
 					}
@@ -253,46 +253,32 @@ async fn open_channel(
 				None => false,
 			};
 
-			// open channel
-			let config = UserConfig {
-				peer_channel_config_limits: ChannelHandshakeLimits {
-					// lnd's max to_self_delay is 2016, so we want to be compatible.
-					their_to_self_delay: 2016,
-					..Default::default()
-				},
-				channel_options: ChannelConfig { announced_channel, ..Default::default() },
-				..Default::default()
-			};
-
-			let peer_pubkey = info.0;
-			let channel_manager = node_var.channel_manager.clone();
-			match channel_manager.create_channel(
-				peer_pubkey,
+			if cli::open_channel(
+				info.0,
 				chan_amt_sat.unwrap(),
-				0,
-				0,
-				Some(config),
-			) {
-				Ok(_) => {
-					let msg = ServerSuccess {
-						msg: format!("EVENT: initiated channel with peer {}. ", peer_pubkey),
-					};
-					return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
-				}
-				Err(e) => {
-					let error =
-						ServerError { error: format!("ERROR: failed to open channel: {:?}", e) };
-					return HttpResponse::BadRequest()
-						.content_type(ContentType::json())
-						.json(error);
-				}
+				announce_channel,
+				node_var.channel_manager.clone(),
+			)
+			.is_ok()
+			{
+				let peer_data_path = format!("{}/channel_peer_data", node_var.ldk_data_dir.clone());
+				let _ = disk::persist_channel_peer(
+					Path::new(&peer_data_path),
+					peer_pubkey_and_ip_addr.as_str(),
+				);
+
+				let msg = ServerSuccess {
+					msg: format!("EVENT: initiated channel with peer {}. ", info.0),
+				};
+				return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
 			}
 		}
 		Err(e) => {
-			let error = ServerError { error: format!("ERROR: {}", e) };
+			let error = ServerError { error: format!("{:?}", e.into_inner().unwrap()) };
 			return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 		}
 	}
+	todo!()
 }
 
 /// Get node information
@@ -333,75 +319,74 @@ async fn list_peers(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpRes
 
 ///List open node channels
 async fn list_channels(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpResponse {
-	let channel_manager = &node_var.channel_manager;
-	let network_graph = &node_var.network_graph;
-	let channels_list = channel_manager.list_channels();
-	let mut channel_vector = Vec::new();
+	let channel_list = node_var.channel_manager.clone().list_channels();
+	let mut chan_vec = Vec::new();
 
-	if channels_list.len() == 0 {
-		let list_channels = ListChannels { channels: Vec::new() };
-		return HttpResponse::Ok().content_type(ContentType::json()).json(list_channels);
-	} else {
-		for chan_info in channels_list {
-			let chan_id = hex_utils::hex_str(&chan_info.channel_id[..]);
+	for chan_info in channel_list {
+		// 1. Get channel id
+		let channel_id = hex_utils::hex_str(&chan_info.channel_id[..]);
+		// 2. Get funding txid if it is set in String format
+		let funding_txid = match chan_info.funding_txo {
+			Some(funding_txo) => format!("{}", funding_txo.txid),
+			None => "".to_string(),
+		};
+		// 3. Get peer public key
+		let peer_pubkey = hex_utils::hex_str(&chan_info.counterparty.node_id.serialize());
+		// 4. Get peer alias
+		if let Some(node_info) = node_var
+			.network_graph
+			.clone()
+			.read_only()
+			.nodes()
+			.get(&NodeId::from_pubkey(&chan_info.counterparty.node_id))
+		{
+			if let Some(announcement) = &node_info.announcement_info {
+				let peer_alias = sanitize_string(&announcement.alias);
 
-			let mut txid = String::new();
-			if let Some(funding_txo) = chan_info.funding_txo {
-				txid = format!("{}", funding_txo.txid);
-			}
-			let peer_pubkey = hex_utils::hex_str(&chan_info.counterparty.node_id.serialize());
+				// 5. Get short channel id
+				if let Some(id) = chan_info.short_channel_id {
+					let short_channel_id = id;
 
-			let mut peer_alias = String::new();
-			if let Some(node_info) = network_graph
-				.read_only()
-				.nodes()
-				.get(&NodeId::from_pubkey(&chan_info.counterparty.node_id))
-			{
-				if let Some(announcement) = &node_info.announcement_info {
-					peer_alias = sanitize_string(&announcement.alias);
+					// 6. Get onchain confirmation, channel value satoshis and local msat balance
+					let is_confirmed_onchain = chan_info.is_funding_locked;
+					let channel_value_satoshis = chan_info.channel_value_satoshis;
+					let local_balance_msat = chan_info.balance_msat;
+
+					// 7. Get available send and receive msat if channel is usable
+					if chan_info.is_usable {
+						let available_balance_for_send_msat = chan_info.outbound_capacity_msat;
+						let available_balance_for_recv_msat = chan_info.inbound_capacity_msat;
+
+						// 8. Get channal public setting and channel can send payment
+						let channel_can_send_payments = chan_info.is_usable;
+						let public = chan_info.is_public;
+
+						// 9. Construct channel structure and append to vec
+						let chan = RedefinedChannelDetails {
+							channel_id,
+							tx_id: funding_txid,
+							peer_pubkey,
+							peer_alias,
+							short_channel_id,
+							is_confirmed_onchain,
+							local_balance_msat,
+							channel_value_satoshis,
+							available_balance_for_recv_msat,
+							available_balance_for_send_msat,
+							channel_can_send_payments,
+							public,
+						};
+
+						// 10. Push channel to vector
+						chan_vec.push(chan);
+					}
 				}
 			}
-
-			let mut short_channel_id: u64 = 0;
-			if let Some(id) = chan_info.short_channel_id {
-				short_channel_id = id;
-			}
-
-			let is_confirmed_onchain = chan_info.is_funding_locked;
-			let channel_value_satoshis = chan_info.channel_value_satoshis;
-			let local_balance_msat = chan_info.balance_msat;
-
-			let mut available_balance_for_send_msat = 0;
-			let mut available_balance_for_recv_msat = 0;
-			if chan_info.is_usable {
-				available_balance_for_send_msat = chan_info.outbound_capacity_msat;
-				available_balance_for_recv_msat = chan_info.inbound_capacity_msat;
-			}
-
-			let channel_can_send_payments = chan_info.is_usable;
-			let public = chan_info.is_public;
-
-			// Create RedefinedChannelDetails and add to vector
-			let chan_details = RedefinedChannelDetails {
-				channel_id: chan_id,
-				tx_id: txid,
-				peer_pubkey,
-				peer_alias,
-				short_channel_id,
-				is_confirmed_onchain,
-				local_balance_msat,
-				channel_value_satoshis,
-				available_balance_for_send_msat,
-				available_balance_for_recv_msat,
-				channel_can_send_payments,
-				public,
-			};
-
-			channel_vector.push(chan_details);
 		}
-		let list_channels = ListChannels { channels: channel_vector };
-		return HttpResponse::Ok().content_type(ContentType::json()).json(list_channels);
 	}
+
+	let list = ListChannels { channels: chan_vec };
+	return HttpResponse::Ok().content_type(ContentType::json()).json(list);
 }
 
 /// Connect to another peer

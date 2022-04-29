@@ -536,7 +536,7 @@ pub(crate) async fn do_connect_peer(
 	}
 }
 
-fn open_channel(
+pub fn open_channel(
 	peer_pubkey: PublicKey, channel_amt_sat: u64, announced_channel: bool,
 	channel_manager: Arc<ChannelManager>,
 ) -> Result<(), ()> {
