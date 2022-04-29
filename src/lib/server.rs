@@ -271,6 +271,10 @@ async fn open_channel(
 					msg: format!("EVENT: initiated channel with peer {}. ", info.0),
 				};
 				return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+			} else {
+				let error =
+					ServerError { error: format!("ERROR: unable to open a channel with peer") };
+				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 			}
 		}
 		Err(e) => {
@@ -278,7 +282,6 @@ async fn open_channel(
 			return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
 		}
 	}
-	todo!()
 }
 
 /// Get node information
@@ -319,74 +322,75 @@ async fn list_peers(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpRes
 
 ///List open node channels
 async fn list_channels(node_var: web::Data<NodeVar<ServerEventHandler>>) -> HttpResponse {
-	let channel_list = node_var.channel_manager.clone().list_channels();
-	let mut chan_vec = Vec::new();
+	let channel_manager = &node_var.channel_manager;
+	let network_graph = &node_var.network_graph;
+	let channels_list = channel_manager.list_channels();
+	let mut channel_vector = Vec::new();
 
-	for chan_info in channel_list {
-		// 1. Get channel id
-		let channel_id = hex_utils::hex_str(&chan_info.channel_id[..]);
-		// 2. Get funding txid if it is set in String format
-		let funding_txid = match chan_info.funding_txo {
-			Some(funding_txo) => format!("{}", funding_txo.txid),
-			None => "".to_string(),
-		};
-		// 3. Get peer public key
-		let peer_pubkey = hex_utils::hex_str(&chan_info.counterparty.node_id.serialize());
-		// 4. Get peer alias
-		if let Some(node_info) = node_var
-			.network_graph
-			.clone()
-			.read_only()
-			.nodes()
-			.get(&NodeId::from_pubkey(&chan_info.counterparty.node_id))
-		{
-			if let Some(announcement) = &node_info.announcement_info {
-				let peer_alias = sanitize_string(&announcement.alias);
+	if channels_list.len() == 0 {
+		let list_channels = ListChannels { channels: Vec::new() };
+		return HttpResponse::Ok().content_type(ContentType::json()).json(list_channels);
+	} else {
+		for chan_info in channels_list {
+			let chan_id = hex_utils::hex_str(&chan_info.channel_id[..]);
 
-				// 5. Get short channel id
-				if let Some(id) = chan_info.short_channel_id {
-					let short_channel_id = id;
+			let mut txid = String::new();
+			if let Some(funding_txo) = chan_info.funding_txo {
+				txid = format!("{}", funding_txo.txid);
+			}
+			let peer_pubkey = hex_utils::hex_str(&chan_info.counterparty.node_id.serialize());
 
-					// 6. Get onchain confirmation, channel value satoshis and local msat balance
-					let is_confirmed_onchain = chan_info.is_funding_locked;
-					let channel_value_satoshis = chan_info.channel_value_satoshis;
-					let local_balance_msat = chan_info.balance_msat;
-
-					// 7. Get available send and receive msat if channel is usable
-					if chan_info.is_usable {
-						let available_balance_for_send_msat = chan_info.outbound_capacity_msat;
-						let available_balance_for_recv_msat = chan_info.inbound_capacity_msat;
-
-						// 8. Get channal public setting and channel can send payment
-						let channel_can_send_payments = chan_info.is_usable;
-						let public = chan_info.is_public;
-
-						// 9. Construct channel structure and append to vec
-						let chan = RedefinedChannelDetails {
-							channel_id,
-							tx_id: funding_txid,
-							peer_pubkey,
-							peer_alias,
-							short_channel_id,
-							is_confirmed_onchain,
-							local_balance_msat,
-							channel_value_satoshis,
-							available_balance_for_recv_msat,
-							available_balance_for_send_msat,
-							channel_can_send_payments,
-							public,
-						};
-
-						// 10. Push channel to vector
-						chan_vec.push(chan);
-					}
+			let mut peer_alias = String::new();
+			if let Some(node_info) = network_graph
+				.read_only()
+				.nodes()
+				.get(&NodeId::from_pubkey(&chan_info.counterparty.node_id))
+			{
+				if let Some(announcement) = &node_info.announcement_info {
+					peer_alias = sanitize_string(&announcement.alias);
 				}
 			}
-		}
-	}
 
-	let list = ListChannels { channels: chan_vec };
-	return HttpResponse::Ok().content_type(ContentType::json()).json(list);
+			let mut short_channel_id: u64 = 0;
+			if let Some(id) = chan_info.short_channel_id {
+				short_channel_id = id;
+			}
+
+			let is_confirmed_onchain = chan_info.is_funding_locked;
+			let channel_value_satoshis = chan_info.channel_value_satoshis;
+			let local_balance_msat = chan_info.balance_msat;
+
+			let mut available_balance_for_send_msat = 0;
+			let mut available_balance_for_recv_msat = 0;
+			if chan_info.is_usable {
+				available_balance_for_send_msat = chan_info.outbound_capacity_msat;
+				available_balance_for_recv_msat = chan_info.inbound_capacity_msat;
+			}
+
+			let channel_can_send_payments = chan_info.is_usable;
+			let public = chan_info.is_public;
+
+			// Create RedefinedChannelDetails and add to vector
+			let chan_details = RedefinedChannelDetails {
+				channel_id: chan_id,
+				tx_id: txid,
+				peer_pubkey,
+				peer_alias,
+				short_channel_id,
+				is_confirmed_onchain,
+				local_balance_msat,
+				channel_value_satoshis,
+				available_balance_for_send_msat,
+				available_balance_for_recv_msat,
+				channel_can_send_payments,
+				public,
+			};
+
+			channel_vector.push(chan_details);
+		}
+		let list_channels = ListChannels { channels: channel_vector };
+		return HttpResponse::Ok().content_type(ContentType::json()).json(list_channels);
+	}
 }
 
 /// Connect to another peer
@@ -585,10 +589,10 @@ async fn list_payments(node_var: web::Data<NodeVar<ServerEventHandler>>) -> Http
 /// Run the server
 pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, std::io::Error> {
 	let node_var = web::Data::new(node_var);
-	let listener = TcpListener::bind(addr).expect("Failed to bind on random port");
-	let port = listener.local_addr().unwrap().port();
+	// let listener = TcpListener::bind(addr).expect("Failed to bind on random port");
+	// let port = listener.local_addr().unwrap().port();
 
-	println!("Server port: {}", port);
+	println!("Server port: {}", addr);
 
 	let server = HttpServer::new(move || {
 		App::new()
@@ -603,7 +607,7 @@ pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, 
 			.route("/listpayments", web::post().to(list_payments))
 			.app_data(node_var.clone())
 	})
-	.listen(listener)?
+	.bind(addr)?
 	.run();
 
 	Ok(server)

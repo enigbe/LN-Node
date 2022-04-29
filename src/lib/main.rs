@@ -520,17 +520,7 @@ pub async fn start_ldk() {
 	let network = args.network;
 	let bitcoind_rpc = bitcoind_client.clone();
 	let handle = tokio::runtime::Handle::current();
-	// let event_handler = move |event: &Event| {
-	// 	handle.block_on(handle_ldk_events(
-	// 		channel_manager_event_listener.clone(),
-	// 		bitcoind_rpc.clone(),
-	// 		keys_manager_listener.clone(),
-	// 		inbound_pmts_for_events.clone(),
-	// 		outbound_pmts_for_events.clone(),
-	// 		network,
-	// 		event,
-	// 	));
-	// };
+
 	let event_handler = ServerEventHandler {
 		tokio_handle: handle.clone(),
 		channel_manager: Arc::clone(&channel_manager),
@@ -649,20 +639,6 @@ pub async fn start_ldk() {
 		});
 	}
 
-	// Start the CLI.
-	// cli::poll_for_user_input(
-	// Arc::clone(&invoice_payer),
-	// Arc::clone(&peer_manager),
-	// Arc::clone(&channel_manager),
-	// Arc::clone(&keys_manager),
-	// Arc::clone(&network_graph),
-	// inbound_payments,
-	// outbound_payments,
-	// ldk_data_dir.clone(),
-	// network,
-	// )
-	// .await;
-
 	// Start server here
 	let node_var = NodeVar {
 		invoice_payer: Arc::clone(&invoice_payer),
@@ -676,7 +652,8 @@ pub async fn start_ldk() {
 		network,
 	};
 
-	match run(node_var, "127.0.0.1:0") {
+	let server_port: u32 = 33335;
+	match run(node_var, format!("127.0.0.1:{}", server_port).as_str()) {
 		Ok(server) => {
 			println!("Starting node server");
 			server.await;
