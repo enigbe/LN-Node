@@ -12,7 +12,8 @@ use actix_web::{http::header::ContentType, web, App, HttpRequest, HttpResponse, 
 use bitcoin::hashes::Hash;
 use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::PublicKey;
-use lightning::chain::keysinterface::KeysManager;
+use lightning::chain::keysinterface::KeysInterface;
+use lightning::chain::keysinterface::{KeysManager, Recipient};
 use lightning::ln::PaymentHash;
 use lightning::routing::network_graph::NetworkGraph;
 use lightning::routing::network_graph::NodeId;
@@ -169,6 +170,18 @@ pub struct Payment {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Payments {
 	payments: Vec<Payment>,
+}
+
+// signmessage struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignMessage {
+	message: String,
+}
+
+// channel struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Channel {
+	channel_id: String,
 }
 
 // Server Error
@@ -586,6 +599,107 @@ async fn list_payments(node_var: web::Data<NodeVar<ServerEventHandler>>) -> Http
 	return HttpResponse::Ok().content_type(ContentType::json()).json(payments);
 }
 
+/// Sign a message
+async fn sign_message(
+	req: web::Json<SignMessage>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let message = req.message.clone();
+	if message.len() == 0 {
+		let error = ServerError { error: format!("ERROR: signmsg requires a message") };
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	} else {
+		let signed_msg = lightning::util::message_signing::sign(
+			message.as_bytes(),
+			&node_var.keys_manager.get_node_secret(Recipient::Node).unwrap(),
+		);
+
+		match signed_msg {
+			Ok(signature) => {
+				let msg = ServerSuccess { msg: signature };
+				return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+			}
+			Err(e) => {
+				let error = ServerError { error: format!("ERROR: failed to sign message. {}", e) };
+				return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+			}
+		}
+	}
+}
+
+/// closechannel
+async fn close_channel(
+	req: web::Json<Channel>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let channel_id_string = req.channel_id.clone();
+	if channel_id_string.len() == 0 {
+		let error = ServerError {
+			error: format!(
+				"ERROR: closechannel requires a channel ID: `closechannel <channel_id>`"
+			),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let channel_id_vec = hex_utils::to_vec(channel_id_string.as_str());
+	if channel_id_vec.is_none() || channel_id_vec.as_ref().unwrap().len() != 32 {
+		let error = ServerError { error: format!("ERROR: couldn't parse channel_id") };
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let mut channel_id = [0; 32];
+	channel_id.copy_from_slice(&channel_id_vec.unwrap());
+	let close_channel_res = cli::close_channel(channel_id, node_var.channel_manager.clone());
+
+	match close_channel_res {
+		Err(e) => {
+			let error = ServerError { error: format!("ERROR: failed to close channel => {:?}", e) };
+			return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+		}
+		Ok(_) => {
+			let msg = ServerSuccess { msg: format!("EVENT: initiating channel close") };
+			return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+		}
+	}
+}
+
+/// forceclosechannel
+async fn force_close_channel(
+	req: web::Json<Channel>, node_var: web::Data<NodeVar<ServerEventHandler>>,
+) -> HttpResponse {
+	let channel_id_string = req.channel_id.clone();
+	if channel_id_string.len() == 0 {
+		let error = ServerError {
+			error: format!(
+				"ERROR: closechannel requires a channel ID: `closechannel <channel_id>`"
+			),
+		};
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let channel_id_vec = hex_utils::to_vec(channel_id_string.as_str());
+	if channel_id_vec.is_none() || channel_id_vec.as_ref().unwrap().len() != 32 {
+		let error = ServerError { error: format!("ERROR: couldn't parse channel_id") };
+		return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+	}
+
+	let mut channel_id = [0; 32];
+	channel_id.copy_from_slice(&channel_id_vec.unwrap());
+
+	let close_channel_res = cli::force_close_channel(channel_id, node_var.channel_manager.clone());
+
+	match close_channel_res {
+		Err(e) => {
+			let error =
+				ServerError { error: format!("ERROR: failed to force-close channel => {:?}", e) };
+			return HttpResponse::BadRequest().content_type(ContentType::json()).json(error);
+		}
+		Ok(_) => {
+			let msg = ServerSuccess { msg: format!("EVENT: initiating channel force-close") };
+			return HttpResponse::Ok().content_type(ContentType::json()).json(msg);
+		}
+	}
+}
+
 /// Run the server
 pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, std::io::Error> {
 	let node_var = web::Data::new(node_var);
@@ -605,6 +719,9 @@ pub fn run(node_var: NodeVar<ServerEventHandler>, addr: &str) -> Result<Server, 
 			.route("/getinvoice", web::post().to(get_invoice))
 			.route("/sendpayment", web::post().to(send_payment))
 			.route("/listpayments", web::post().to(list_payments))
+			.route("/signmessage", web::post().to(sign_message))
+			.route("/closechannel", web::post().to(close_channel))
+			.route("/forceclosechannel", web::post().to(force_close_channel))
 			.app_data(node_var.clone())
 	})
 	.bind(addr)?

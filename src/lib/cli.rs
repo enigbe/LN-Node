@@ -13,6 +13,7 @@ use lightning::ln::msgs::NetAddress;
 use lightning::ln::{PaymentHash, PaymentPreimage};
 use lightning::routing::network_graph::{NetworkGraph, NodeId};
 use lightning::util::config::{ChannelConfig, ChannelHandshakeLimits, UserConfig};
+use lightning::util::errors::APIError;
 use lightning::util::events::EventHandler;
 use lightning_invoice::payment::PaymentError;
 use lightning_invoice::{utils, Currency, Invoice};
@@ -690,17 +691,33 @@ pub fn get_invoice(
 	);
 }
 
-fn close_channel(channel_id: [u8; 32], channel_manager: Arc<ChannelManager>) {
+pub fn close_channel(
+	channel_id: [u8; 32], channel_manager: Arc<ChannelManager>,
+) -> Result<(), APIError> {
 	match channel_manager.close_channel(&channel_id) {
-		Ok(()) => println!("EVENT: initiating channel close"),
-		Err(e) => println!("ERROR: failed to close channel: {:?}", e),
+		Ok(()) => {
+			println!("EVENT: initiating channel close");
+			Ok(())
+		}
+		Err(e) => {
+			println!("ERROR: failed to close channel: {:?}", e);
+			Err(e)
+		}
 	}
 }
 
-fn force_close_channel(channel_id: [u8; 32], channel_manager: Arc<ChannelManager>) {
+pub fn force_close_channel(
+	channel_id: [u8; 32], channel_manager: Arc<ChannelManager>,
+) -> Result<(), APIError> {
 	match channel_manager.force_close_channel(&channel_id) {
-		Ok(()) => println!("EVENT: initiating channel force-close"),
-		Err(e) => println!("ERROR: failed to force-close channel: {:?}", e),
+		Ok(()) => {
+			println!("EVENT: initiating channel force-close");
+			Ok(())
+		}
+		Err(e) => {
+			println!("ERROR: failed to force-close channel: {:?}", e);
+			Err(e)
+		}
 	}
 }
 
