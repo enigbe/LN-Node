@@ -13,6 +13,7 @@ use lightning::ln::msgs::NetAddress;
 use lightning::ln::{PaymentHash, PaymentPreimage};
 use lightning::routing::network_graph::{NetworkGraph, NodeId};
 use lightning::util::config::{ChannelConfig, ChannelHandshakeLimits, UserConfig};
+use lightning::util::errors::APIError;
 use lightning::util::events::EventHandler;
 use lightning_invoice::payment::PaymentError;
 use lightning_invoice::{utils, Currency, Invoice};
@@ -401,7 +402,7 @@ fn list_peers(peer_manager: Arc<PeerManager>) {
 }
 
 /// Takes some untrusted bytes and returns a sanitized string that is safe to print
-fn sanitize_string(bytes: &[u8]) -> String {
+pub fn sanitize_string(bytes: &[u8]) -> String {
 	let mut ret = String::with_capacity(bytes.len());
 	// We should really support some sane subset of UTF-8 here, but limiting to printable ASCII
 	// instead makes this trivial.
@@ -496,7 +497,7 @@ fn list_payments(inbound_payments: PaymentInfoStorage, outbound_payments: Paymen
 	println!("]");
 }
 
-pub(crate) async fn connect_peer_if_necessary(
+pub async fn connect_peer_if_necessary(
 	pubkey: PublicKey, peer_addr: SocketAddr, peer_manager: Arc<PeerManager>,
 ) -> Result<(), ()> {
 	for node_pubkey in peer_manager.get_peer_node_ids() {
@@ -536,7 +537,7 @@ pub(crate) async fn do_connect_peer(
 	}
 }
 
-fn open_channel(
+pub fn open_channel(
 	peer_pubkey: PublicKey, channel_amt_sat: u64, announced_channel: bool,
 	channel_manager: Arc<ChannelManager>,
 ) -> Result<(), ()> {
@@ -650,7 +651,7 @@ fn keysend<E: EventHandler, K: KeysInterface>(
 	);
 }
 
-fn get_invoice(
+pub fn get_invoice(
 	amt_msat: u64, payment_storage: PaymentInfoStorage, channel_manager: Arc<ChannelManager>,
 	keys_manager: Arc<KeysManager>, network: Network,
 ) {
@@ -690,21 +691,37 @@ fn get_invoice(
 	);
 }
 
-fn close_channel(channel_id: [u8; 32], channel_manager: Arc<ChannelManager>) {
+pub fn close_channel(
+	channel_id: [u8; 32], channel_manager: Arc<ChannelManager>,
+) -> Result<(), APIError> {
 	match channel_manager.close_channel(&channel_id) {
-		Ok(()) => println!("EVENT: initiating channel close"),
-		Err(e) => println!("ERROR: failed to close channel: {:?}", e),
+		Ok(()) => {
+			println!("EVENT: initiating channel close");
+			Ok(())
+		}
+		Err(e) => {
+			println!("ERROR: failed to close channel: {:?}", e);
+			Err(e)
+		}
 	}
 }
 
-fn force_close_channel(channel_id: [u8; 32], channel_manager: Arc<ChannelManager>) {
+pub fn force_close_channel(
+	channel_id: [u8; 32], channel_manager: Arc<ChannelManager>,
+) -> Result<(), APIError> {
 	match channel_manager.force_close_channel(&channel_id) {
-		Ok(()) => println!("EVENT: initiating channel force-close"),
-		Err(e) => println!("ERROR: failed to force-close channel: {:?}", e),
+		Ok(()) => {
+			println!("EVENT: initiating channel force-close");
+			Ok(())
+		}
+		Err(e) => {
+			println!("ERROR: failed to force-close channel: {:?}", e);
+			Err(e)
+		}
 	}
 }
 
-pub(crate) fn parse_peer_info(
+pub fn parse_peer_info(
 	peer_pubkey_and_ip_addr: String,
 ) -> Result<(PublicKey, SocketAddr), std::io::Error> {
 	let mut pubkey_and_addr = peer_pubkey_and_ip_addr.split("@");

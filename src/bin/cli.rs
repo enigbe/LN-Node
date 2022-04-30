@@ -1,5 +1,6 @@
+use lnnode::server::{Help, ListPeers};
 use reqwest;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::env;
 
@@ -17,6 +18,7 @@ enum Command {
 	NodeInfo,
 	ListPeers,
 	SignMessage { message: String },
+	Help,
 }
 
 impl Command {
@@ -29,12 +31,13 @@ impl Command {
 		let arg = cmd_input[1].trim().to_lowercase();
 		match arg.as_str() {
 			"openchannel" => {
+				// TODO: parse optional `public` parameter
 				let channel_info_parts: Vec<&str> = cmd_input[2].split("@").collect();
 				let host_info_parts: Vec<&str> = channel_info_parts[1].split(":").collect();
 				let pub_key = channel_info_parts[0].to_string();
 				let host = host_info_parts[0].to_string();
 				let port = host_info_parts[1].to_string();
-				let amount_satoshis = cmd_input[2].clone();
+				let amount_satoshis = cmd_input[3].clone();
 				return Some(Command::OpenChannel { pub_key, host, port, amount_satoshis });
 			}
 			"sendpayment" => {
@@ -69,8 +72,24 @@ impl Command {
 				let message = cmd_input[2].to_string();
 				return Some(Command::SignMessage { message });
 			}
+			"help" => {
+				return Some(Command::Help);
+			}
 			_ => None,
 		}
+	}
+}
+
+#[derive(Debug, Deserialize)]
+enum ServerResp {
+	Help,
+	ListPeers,
+	ListChannels,
+}
+
+impl ServerResp {
+	fn process(resp: Result<Self, reqwest::Error>) -> () {
+		todo!()
 	}
 }
 
@@ -102,10 +121,11 @@ async fn main() {
 	let req_body = serde_json::to_string(&command).unwrap();
 
 	// 4. Send request to node server
-	let server_resp = cli_client.post(url).body(req_body).send().await.unwrap();
+	// let resp = cli_client.post(url).body(req_body).send().await.unwrap().json::<ServerResp>().await;
+	let resp = cli_client.post(url).body(req_body).send().await.unwrap();
 
-	println!("{:?}", server_resp);
+	println!("{:?}", resp);
 
-	// 5. Get and process the response from server
-	// 6. Print server response to terminal
+	// 5. Match the response to designed enum types and process accordingly
+	// 6. Write server response to terminal
 }

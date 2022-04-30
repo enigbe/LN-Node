@@ -50,6 +50,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Write;
+use std::net::TcpListener;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -60,93 +61,6 @@ use node_var::{
 	ChainMonitor, ChannelManager, DataPersister, HTLCStatus, InvoicePayer, MillisatAmount,
 	PaymentInfo, PaymentInfoStorage, PeerManager, Router,
 };
-
-// pub(crate) enum HTLCStatus {
-// 	Pending,
-// 	Succeeded,
-// 	Failed,
-// }
-
-// pub(crate) struct MillisatAmount(pub Option<u64>);
-
-// impl fmt::Display for MillisatAmount {
-// 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-// 		match self.0 {
-// 			Some(amt) => write!(f, "{}", amt),
-// 			None => write!(f, "unknown"),
-// 		}
-// 	}
-// }
-
-// pub(crate) struct PaymentInfo {
-// 	pub preimage: Option<PaymentPreimage>,
-// 	pub secret: Option<PaymentSecret>,
-// 	pub status: HTLCStatus,
-// 	pub amt_msat: MillisatAmount,
-// }
-
-// pub(crate) type PaymentInfoStorage = Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>;
-
-// type ChainMonitor = chainmonitor::ChainMonitor<
-// 	InMemorySigner,
-// 	Arc<dyn Filter + Send + Sync>,
-// 	Arc<BitcoindClient>,
-// 	Arc<BitcoindClient>,
-// 	Arc<FilesystemLogger>,
-// 	Arc<FilesystemPersister>,
-// >;
-
-// pub(crate) type PeerManager = SimpleArcPeerManager<
-// 	SocketDescriptor,
-// 	ChainMonitor,
-// 	BitcoindClient,
-// 	BitcoindClient,
-// 	dyn chain::Access + Send + Sync,
-// 	FilesystemLogger,
-// >;
-
-// pub(crate) type ChannelManager =
-// 	SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
-
-// pub(crate) type InvoicePayer<E> = payment::InvoicePayer<
-// 	Arc<ChannelManager>,
-// 	Router,
-// 	Arc<Mutex<ProbabilisticScorer<Arc<NetworkGraph>>>>,
-// 	Arc<FilesystemLogger>,
-// 	E,
-// >;
-
-// type Router = DefaultRouter<Arc<NetworkGraph>, Arc<FilesystemLogger>>;
-
-// struct DataPersister {
-// 	data_dir: String,
-// }
-
-// impl
-// 	Persister<
-// 		InMemorySigner,
-// 		Arc<ChainMonitor>,
-// 		Arc<BitcoindClient>,
-// 		Arc<KeysManager>,
-// 		Arc<BitcoindClient>,
-// 		Arc<FilesystemLogger>,
-// 	> for DataPersister
-// {
-// 	fn persist_manager(&self, channel_manager: &ChannelManager) -> Result<(), std::io::Error> {
-// 		FilesystemPersister::persist_manager(self.data_dir.clone(), channel_manager)
-// 	}
-
-// 	fn persist_graph(&self, network_graph: &NetworkGraph) -> Result<(), std::io::Error> {
-// 		if FilesystemPersister::persist_network_graph(self.data_dir.clone(), network_graph).is_err()
-// 		{
-// 			// Persistence errors here are non-fatal as we can just fetch the routing graph
-// 			// again later, but they may indicate a disk error which could be fatal elsewhere.
-// 			eprintln!("Warning: Failed to persist network graph, check your disk and permissions");
-// 		}
-
-// 		Ok(())
-// 	}
-// }
 
 async fn handle_ldk_events(
 	channel_manager: Arc<ChannelManager>, bitcoind_client: Arc<BitcoindClient>,
@@ -606,18 +520,9 @@ pub async fn start_ldk() {
 	let network = args.network;
 	let bitcoind_rpc = bitcoind_client.clone();
 	let handle = tokio::runtime::Handle::current();
-	// let event_handler = move |event: &Event| {
-	// 	handle.block_on(handle_ldk_events(
-	// 		channel_manager_event_listener.clone(),
-	// 		bitcoind_rpc.clone(),
-	// 		keys_manager_listener.clone(),
-	// 		inbound_pmts_for_events.clone(),
-	// 		outbound_pmts_for_events.clone(),
-	// 		network,
-	// 		event,
-	// 	));
-	// };
+
 	let event_handler = ServerEventHandler {
+		tokio_handle: handle.clone(),
 		channel_manager: Arc::clone(&channel_manager),
 		bitcoind_client: Arc::clone(&bitcoind_client),
 		keys_manager: Arc::clone(&keys_manager),
@@ -734,20 +639,6 @@ pub async fn start_ldk() {
 		});
 	}
 
-	// Start the CLI.
-	// cli::poll_for_user_input(
-	// Arc::clone(&invoice_payer),
-	// Arc::clone(&peer_manager),
-	// Arc::clone(&channel_manager),
-	// Arc::clone(&keys_manager),
-	// Arc::clone(&network_graph),
-	// inbound_payments,
-	// outbound_payments,
-	// ldk_data_dir.clone(),
-	// network,
-	// )
-	// .await;
-
 	// Start server here
 	let node_var = NodeVar {
 		invoice_payer: Arc::clone(&invoice_payer),
@@ -761,9 +652,10 @@ pub async fn start_ldk() {
 		network,
 	};
 
-	match run(node_var) {
+	let server_port: u32 = 33335;
+	match run(node_var, format!("127.0.0.1:{}", server_port).as_str()) {
 		Ok(server) => {
-			println!("Started node server successfully");
+			println!("Starting node server");
 			server.await;
 		}
 		Err(e) => {

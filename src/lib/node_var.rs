@@ -16,17 +16,20 @@ use lightning_invoice::payment;
 use lightning_invoice::utils::DefaultRouter;
 use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::FilesystemPersister;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
 /// Defines the status variations of an HTLC
+#[derive(Debug, Deserialize, Serialize)]
 pub enum HTLCStatus {
 	Pending,
 	Succeeded,
 	Failed,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MillisatAmount(pub Option<u64>);
 
 impl fmt::Display for MillisatAmount {
