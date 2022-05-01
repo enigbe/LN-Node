@@ -74,12 +74,12 @@ impl EventHandler for ServerEventHandler {
 // NodeInfo struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeInfo {
-	pubkey: PublicKey,
+	pub pubkey: PublicKey,
 	// channel_list: Vec<ChannelDetails>,
-	channels_number: usize,
-	usable_channels_number: usize,
-	local_balance_msat: u64,
-	peers: usize,
+	pub channels_number: usize,
+	pub usable_channels_number: usize,
+	pub local_balance_msat: u64,
+	pub peers: usize,
 }
 
 // Help command struct
@@ -187,13 +187,13 @@ pub struct Channel {
 // Server Error
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerError {
-	error: String,
+	pub error: String,
 }
 
 // Server suceess
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerSuccess {
-	msg: String,
+	pub msg: String,
 }
 
 /// Get helpful information on how to interact with the lightning node
