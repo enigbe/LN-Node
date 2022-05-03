@@ -1,3 +1,4 @@
+#[allow(unused_variables, unused_assignments)]
 use crate::bitcoind_client::BitcoindClient;
 use crate::cli;
 use crate::cli::{connect_peer_if_necessary, parse_peer_info, sanitize_string};
@@ -17,14 +18,10 @@ use lightning::chain::keysinterface::{KeysManager, Recipient};
 use lightning::ln::PaymentHash;
 use lightning::routing::network_graph::NetworkGraph;
 use lightning::routing::network_graph::NodeId;
-use lightning::util::config::ChannelConfig;
-use lightning::util::config::ChannelHandshakeLimits;
-use lightning::util::config::UserConfig;
 use lightning::util::events::{Event, EventHandler};
 use lightning_invoice::payment::PaymentError;
 use lightning_invoice::{utils, Currency, Invoice};
 use serde::{Deserialize, Serialize};
-use std::net::TcpListener;
 use std::ops::Deref;
 use std::path::Path;
 use std::string::String;
@@ -74,12 +71,12 @@ impl EventHandler for ServerEventHandler {
 // NodeInfo struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeInfo {
-	pubkey: PublicKey,
+	pub pubkey: PublicKey,
 	// channel_list: Vec<ChannelDetails>,
-	channels_number: usize,
-	usable_channels_number: usize,
-	local_balance_msat: u64,
-	peers: usize,
+	pub channels_number: usize,
+	pub usable_channels_number: usize,
+	pub local_balance_msat: u64,
+	pub peers: usize,
 }
 
 // Help command struct
@@ -107,24 +104,24 @@ pub struct ListPeers {
 // Struct containing redefined channel details
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RedefinedChannelDetails {
-	channel_id: String,
-	tx_id: String,
-	peer_pubkey: String,
-	peer_alias: String,
-	short_channel_id: u64,
-	is_confirmed_onchain: bool,
-	local_balance_msat: u64,
-	channel_value_satoshis: u64,
-	available_balance_for_send_msat: u64,
-	available_balance_for_recv_msat: u64,
-	channel_can_send_payments: bool,
-	public: bool,
+	pub channel_id: String,
+	pub tx_id: String,
+	pub peer_pubkey: String,
+	pub peer_alias: String,
+	pub short_channel_id: u64,
+	pub is_confirmed_onchain: bool,
+	pub local_balance_msat: u64,
+	pub channel_value_satoshis: u64,
+	pub available_balance_for_send_msat: u64,
+	pub available_balance_for_recv_msat: u64,
+	pub channel_can_send_payments: bool,
+	pub public: bool,
 }
 
 // Struct containing the list of channels a node has
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListChannels {
-	channels: Vec<RedefinedChannelDetails>,
+	pub channels: Vec<RedefinedChannelDetails>,
 }
 
 // openchannel request struct
@@ -154,22 +151,22 @@ pub struct GetInvoice {
 // invoice/payment request struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerInvoice {
-	invoice: String,
+	pub invoice: String,
 }
 
 // payment struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Payment {
-	amount_millisatoshis: String,
-	payment_hash: String,
-	htlc_direction: String,
-	htlc_status: String,
+	pub amount_millisatoshis: String,
+	pub payment_hash: String,
+	pub htlc_direction: String,
+	pub htlc_status: String,
 }
 
 // payments struct
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Payments {
-	payments: Vec<Payment>,
+	pub payments: Vec<Payment>,
 }
 
 // signmessage struct
@@ -187,13 +184,13 @@ pub struct Channel {
 // Server Error
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerError {
-	error: String,
+	pub error: String,
 }
 
 // Server suceess
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerSuccess {
-	msg: String,
+	pub msg: String,
 }
 
 /// Get helpful information on how to interact with the lightning node
@@ -299,7 +296,7 @@ async fn open_channel(
 
 /// Get node information
 async fn nodeinfo(
-	req: HttpRequest, node_var: web::Data<NodeVar<ServerEventHandler>>,
+	_req: HttpRequest, node_var: web::Data<NodeVar<ServerEventHandler>>,
 ) -> HttpResponse {
 	let pubkey = node_var.channel_manager.get_our_node_id();
 	let channel_list = node_var.channel_manager.list_channels();

@@ -1,3 +1,4 @@
+#[allow(unused_variables, unused_assignments)]
 pub mod bitcoind_client;
 pub mod cli;
 pub mod convert;
@@ -50,7 +51,6 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Write;
-use std::net::TcpListener;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,7 +59,7 @@ use std::time::{Duration, SystemTime};
 
 use node_var::{
 	ChainMonitor, ChannelManager, DataPersister, HTLCStatus, InvoicePayer, MillisatAmount,
-	PaymentInfo, PaymentInfoStorage, PeerManager, Router,
+	PaymentInfo, PaymentInfoStorage, PeerManager,
 };
 
 async fn handle_ldk_events(

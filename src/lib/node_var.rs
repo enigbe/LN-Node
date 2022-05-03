@@ -4,14 +4,12 @@ use lightning::chain;
 use lightning::chain::chainmonitor;
 use lightning::chain::keysinterface::{InMemorySigner, KeysInterface, KeysManager, Recipient};
 use lightning::chain::Filter;
-use lightning::ln::channelmanager::{
-	ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
-};
-use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
+use lightning::ln::channelmanager::SimpleArcChannelManager;
+use lightning::ln::peer_handler::SimpleArcPeerManager;
 use lightning::ln::{PaymentHash, PaymentPreimage, PaymentSecret};
-use lightning::routing::network_graph::{NetGraphMsgHandler, NetworkGraph};
+use lightning::routing::network_graph::NetworkGraph;
 use lightning::routing::scoring::ProbabilisticScorer;
-use lightning_background_processor::{BackgroundProcessor, Persister};
+use lightning_background_processor::Persister;
 use lightning_invoice::payment;
 use lightning_invoice::utils::DefaultRouter;
 use lightning_net_tokio::SocketDescriptor;
