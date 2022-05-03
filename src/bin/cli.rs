@@ -1,6 +1,9 @@
-use lnnode::server::{Help, NodeInfo, ServerSuccess};
+#[allow(unused_variables)]
+use lnnode::server::{
+	Help, ListChannels, ListPeers, NodeInfo, Payments, ServerInvoice, ServerSuccess,
+};
 use reqwest;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{collections::HashMap, env};
 
 /// LDK CLI command
@@ -51,6 +54,7 @@ impl Command {
 			}
 			"connectpeer" => {
 				if cmd_input.len() < 3 {
+					println!("-----------------------------------");
 					println!("LN-Node peer connection information:");
 					println!("-----------------------------------");
 					println!("\tError: invalid connectpeer command");
@@ -160,7 +164,10 @@ async fn main() {
 		}
 	}
 	if count == 0 {
-		println!("Entered an invalid command. Enter `lnnode-cli help` to get list of all commands");
+		println!("-----------------------------------");
+		println!("Entered an invalid command.");
+		println!("Type `lnnode-cli help` for commands list");
+		println!("-----------------------------------");
 		return;
 	}
 	// 3. Create a request body with matching map
@@ -182,6 +189,7 @@ async fn main() {
 			let help_resp = resp.json::<Help>().await;
 			match help_resp {
 				Ok(help) => {
+					println!("-----------------------------------");
 					println!("LN-Node help commands:");
 					println!("-----------------------------------");
 					println!("\tnodeinfo: {:?}", help.nodeinfo);
@@ -205,9 +213,10 @@ async fn main() {
 			let nodeinfo_resp = resp.json::<NodeInfo>().await;
 			match nodeinfo_resp {
 				Ok(info) => {
+					println!("-----------------------------------");
 					println!("LN-Node node information:");
 					println!("-----------------------------------");
-					println!("\tpubkey: {:?}", info.pubkey);
+					println!("\tpubkey: {:?}", format!("{}", info.pubkey));
 					println!("\tchannels_number: {:?}", info.channels_number);
 					println!("\tusable_channels_number: {:?}", info.usable_channels_number);
 					println!("\tlocal_balance_msat: {:?}", info.local_balance_msat);
@@ -222,6 +231,7 @@ async fn main() {
 			let connectpeer_resp = resp.json::<ServerSuccess>().await;
 			match connectpeer_resp {
 				Ok(peer_msg) => {
+					println!("-----------------------------------");
 					println!("LN-Node peer connection information:");
 					println!("-----------------------------------");
 					println!("\tconnection message: {:?}", peer_msg.msg);
@@ -235,6 +245,7 @@ async fn main() {
 			let openchannel_resp = resp.json::<ServerSuccess>().await;
 			match openchannel_resp {
 				Ok(openchannel_msg) => {
+					println!("-----------------------------------");
 					println!("LN-Node opening a payment channel:");
 					println!("-----------------------------------");
 					println!("\tchannel message: {:?}", openchannel_msg.msg);
@@ -244,14 +255,172 @@ async fn main() {
 				}
 			}
 		}
-		"listpeers" => {}
-		"listchannels" => {}
-		"getinvoice" => {}
-		"sendpayment" => {}
-		"closechannel" => {}
-		"forceclosechannel" => {}
-		"signmessage" => {}
-		_ => (),
+		"listpeers" => {
+			let listpeers_resp = resp.json::<ListPeers>().await;
+			match listpeers_resp {
+				Ok(peers) => {
+					println!("-----------------------------------");
+					println!("LN-Node peers listing:");
+					println!("-----------------------------------");
+					println!("\tpeers: [");
+					for peer in peers.peers {
+						let peer_str = format!("{}", peer);
+						println!("\t{}", peer_str);
+					}
+					println!("\t]");
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"listchannels" => {
+			let listchannels_resp = resp.json::<ListChannels>().await;
+			match listchannels_resp {
+				Ok(channels) => {
+					println!("-----------------------------------");
+					println!("LN-Node channels listing:");
+					println!("-----------------------------------");
+					if channels.channels.len() == 0 {
+						println!("\tchannels: []");
+					} else {
+						for channel in channels.channels {
+							println!("\tchannel_id: {:?}", channel.channel_id);
+							println!("\ttx_id: {:?}", channel.tx_id);
+							println!("\tpeer_pubkey: {:?}", format!("{}", channel.peer_pubkey));
+							println!("\tpeer_alias: {:?}", channel.peer_alias);
+							println!("\tis_confirmed_onchain: {:?}", channel.is_confirmed_onchain);
+							println!("\tlocal_balance_msat: {:?}", channel.local_balance_msat);
+							println!(
+								"\tchannel_value_satoshis: {:?}",
+								channel.channel_value_satoshis
+							);
+							println!(
+								"\tavailable_balance_for_send_msat: {:?}",
+								channel.available_balance_for_send_msat
+							);
+							println!(
+								"\tavailable_balance_for_recv_msat: {:?}",
+								channel.available_balance_for_recv_msat
+							);
+							println!(
+								"\tchannel_can_send_payments: {:?}",
+								channel.channel_can_send_payments
+							);
+							println!("\tpublic: {:?}", channel.public);
+							println!("    --------------------");
+						}
+					}
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"getinvoice" => {
+			let getinvoice_resp = resp.json::<ServerInvoice>().await;
+			match getinvoice_resp {
+				Ok(invoice) => {
+					println!("-----------------------------------");
+					println!("LN-Node channels listing:");
+					println!("-----------------------------------");
+					println!("\tinvoice: {:?}", invoice.invoice);
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"sendpayment" => {
+			let sendpayment_resp = resp.json::<ServerSuccess>().await;
+			match sendpayment_resp {
+				Ok(msg) => {
+					println!("-----------------------------------");
+					println!("LN-Node sending payment:");
+					println!("-----------------------------------");
+					println!("\tmessage: {:?}", msg.msg);
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"listpayments" => {
+			let listpayments_resp = resp.json::<Payments>().await;
+			match listpayments_resp {
+				Ok(payments) => {
+					println!("-----------------------------------");
+					println!("LN-Node payments listing:");
+					println!("-----------------------------------");
+					if payments.payments.len() == 0 {
+						println!("\tpayments: []");
+					} else {
+						for payment in payments.payments {
+							println!("\tamount_millisatoshis: {}", payment.amount_millisatoshis);
+							println!("\tpayment_hash: {}", payment.payment_hash);
+							println!("\thtlc_direction: {}", payment.htlc_direction);
+							println!("\thtlc_status: {}", payment.htlc_status);
+							println!("    --------------------");
+						}
+					}
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"closechannel" => {
+			let closechannel_resp = resp.json::<ServerSuccess>().await;
+
+			match closechannel_resp {
+				Ok(msg) => {
+					println!("-----------------------------------");
+					println!("LN-Node close channel message:");
+					println!("-----------------------------------");
+					println!("\tclosechannel message: {:?}", msg.msg);
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"forceclosechannel" => {
+			let forceclosechannel_resp = resp.json::<ServerSuccess>().await;
+
+			match forceclosechannel_resp {
+				Ok(msg) => {
+					println!("-----------------------------------");
+					println!("LN-Node force close channel message:");
+					println!("-----------------------------------");
+					println!("\tforceclosechannel message: {:?}", msg.msg);
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		"signmessage" => {
+			let signmessage_resp = resp.json::<ServerSuccess>().await;
+
+			match signmessage_resp {
+				Ok(msg) => {
+					println!("-----------------------------------");
+					println!("LN-Node sign message message:");
+					println!("-----------------------------------");
+					println!("\tsignature: {:?}", msg.msg);
+				}
+				Err(e) => {
+					println!("LN-Node-server error: {}", e);
+				}
+			}
+		}
+		_ => {
+			println!("-----------------------------------");
+			println!("LN-Node invalid command:");
+			println!("-----------------------------------");
+			println!(
+				"You have entered an invalid command. Type `lnnode-cli help` for command list"
+			);
+		}
 	}
-	// 6. Write server response to terminal
 }

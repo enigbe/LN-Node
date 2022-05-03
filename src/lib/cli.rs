@@ -1,3 +1,4 @@
+#![allow(unused_variables, unused_assignments, dead_code)]
 use crate::disk;
 use crate::hex_utils;
 use crate::{
