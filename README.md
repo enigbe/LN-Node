@@ -3,6 +3,8 @@
 Re-architecting the LDK's sample node implementation to have a separate CLI binary and actix-web server. LN-Node's is a lightning node with a separate CLI binary that should work akin to
 `LND` and its command line interface tool `lncli`
 
+![Architecture](./img/ln_node.png)
+
 ## Installation
 
 ```bash
